@@ -73,29 +73,7 @@ make generate     → gera zz_generated.deepcopy.go
 make manifests    → gera CRD YAML + RBAC YAML a partir dos markers
 make test         → testes unitarios + envtest (baixa etcd/kube-apiserver em bin/)
 make build        → compila o binario do manager
-docker build -t tep-operator:latest .
+make docker-build  → imagem tep-operator:latest (IMG=... para outro nome)
 ```
 
 **Windows**: `make generate manifests` funciona, mas o Makefile passa os pacotes explicitamente (`paths="./api/v1alpha1" paths="./internal/controller"`) porque `paths="./..."` falha no Windows ("no Go files"). Se criar um pacote novo com markers, adicione o path no Makefile. O envtest tambem roda no Windows; o unico porem e que ele nao consegue encerrar etcd/kube-apiserver no fim (o `AfterSuite` ignora esse erro so no Windows).
-
-## O que foi removido do scaffold original
-
-O Kubebuilder gera um projeto pronto pra producao com CI, monitoring, linting pesado, etc.
-Pra um lab, isso e peso morto. Removemos em marco/2026:
-
-| Removido                 | O que era                                      | Porque saiu                                                     |
-| ------------------------ | ---------------------------------------------- | --------------------------------------------------------------- |
-| `.github/workflows/`     | CI (lint, test, e2e)                           | Nao esta configurado pra esse repo. Recria quando tiver CI real |
-| `.devcontainer/`         | Config de Codespace/devcontainer               | Nao usamos Codespaces                                           |
-| `config/prometheus/`     | ServiceMonitor pro Prometheus                  | Monitoring vem depois, se precisar                              |
-| `config/network-policy/` | NetworkPolicy K8s                              | Desnecessario num Kind local                                    |
-| `.golangci.yml`          | Config do golangci-lint (24 linters)           | Overkill pro lab. `go vet` resolve                              |
-| `.custom-gcl.yml`        | Plugin custom do linter (logcheck)             | Overkill                                                        |
-| `AGENTS.md`              | Guia generico do Kubebuilder pra agentes de IA | Substituido pelos nossos `docs/`                                |
-
-Tambem simplificamos `config/default/kustomization.yaml` — era 235 linhas de boilerplate
-comentado (webhooks, cert-manager, etc). Ficou com ~15 linhas, so o que esta ativo.
-
-**Se precisar de volta**: tudo que foi removido e padrao do Kubebuilder. Basta rodar
-`kubebuilder init` num repo limpo pra ver os templates, ou consultar o
-[Kubebuilder Book](https://book.kubebuilder.io/).

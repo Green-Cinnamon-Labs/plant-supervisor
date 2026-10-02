@@ -55,6 +55,6 @@ O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operato
 ```bash
 make generate manifests                       # regenera deepcopy, CRDs e RBAC
 make test                                     # unitarios + envtest
-docker build -t tep-operator:latest .
+make docker-build
 # deploy no Kind: ver tep-supervisor/local/setup.sh
 ```

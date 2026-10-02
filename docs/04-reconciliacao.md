@@ -47,9 +47,9 @@ O passo 5 e o passo 6 sao funcoes puras em `internal/evaluate` — o resto e enc
 - **Quando o spec do Plant muda** (ex.: `kubectl edit plant tep` trocando `policyRef`). Mudancas so de `status` sao ignoradas (`GenerationChangedPredicate`), senao o operator se re-dispararia a cada escrita do proprio veredito.
 - **Quando uma OperatingPolicy ou CostFunction muda**: todos os Plants do namespace sao reavaliados na hora, sem esperar o proximo intervalo. Simples e suficiente para o lab (poucos Plants por namespace).
 
-## Por que o operator nao fala OPC-UA
+## Por que o operator nao fala com a planta
 
-Ate a versao anterior (`PLCMachine`), o operator falava gRPC direto com a planta. Agora ele so conversa com o historian. Motivos:
+O operator so conversa com o historian, nunca com a planta. Motivos:
 
 - **Genericidade**: o operator nao precisa saber o protocolo nem a estrutura da planta. Outra planta, com outro protocolo, so precisa de um historian que responda `/aggregate`.
 - **Separacao de papeis**: o historian interpreta sinais (janela, media, desvio padrao); o operator fala Kubernetes (spec, status, conditions).

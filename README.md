@@ -21,7 +21,7 @@ Kubernetes never sees raw signals. `tep-historian` turns signals into window sta
 
 make generate manifests   # deepcopy, CRDs, RBAC
 make test                 # unit + envtest
-docker build -t tep-operator:latest .
+make docker-build
 ```
 
 Deploying to Kind with the TEP manifests: `tep-supervisor/local/setup.sh`.
