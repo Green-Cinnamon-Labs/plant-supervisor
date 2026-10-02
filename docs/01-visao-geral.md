@@ -17,18 +17,16 @@ tep-supervisor          <- infra (Kind, compose) e os manifestos TEP
 tep-ihm                 <- dashboard; le o veredito do Plant pela API do K8s
 ```
 
-```mermaid
-flowchart LR
-    Plant["tep-plant<br/>(OPC-UA :4840)"]
-    Historian["tep-historian<br/>medias por janela"]
-    Operator["tep-operator<br/>(Pod no Kind)"]
-    API["API do Kubernetes<br/>Plant.status"]
-    IHM["tep-ihm / kubectl"]
-
-    Plant -->|OPC-UA| Historian
-    Operator -->|POST /aggregate| Historian
-    Operator -->|escreve status| API
-    API -->|watch| IHM
+```
+ tep-plant ──OPC-UA──▶ tep-historian ◀──POST /aggregate── tep-operator (Pod no Kind)
+ (:4840)               (medias por janela, :8090)              │
+                                                               │ escreve o veredito
+                                                               ▼
+                                         API do Kubernetes: Plant.status
+                                                               │
+                                                               │ watch
+                                                               ▼
+                                                     tep-ihm / kubectl
 ```
 
 O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operator traduz estatisticas em veredito, e o k8s guarda o veredito e avisa quem estiver observando.
@@ -42,13 +40,13 @@ O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operato
 
 ## Estado atual
 
-| O que                                   | Status |
-|-----------------------------------------|--------|
-| CRDs Plant / OperatingPolicy / CostFunction | Pronto |
+| O que                                                                 | Status                                                |
+| --------------------------------------------------------------------- | ----------------------------------------------------- |
+| CRDs Plant / OperatingPolicy / CostFunction                           | Pronto                                                |
 | Avaliacao de J, metas, restricoes, persistencia (`internal/evaluate`) | Pronto, testado (caso base Downs & Vogel = 170.6 $/h) |
-| Reconciler de Plant                      | Pronto, testado com envtest |
-| Teste ponta a ponta no Kind              | Feito (planta + historian no host) |
-| Atuar na planta (setpoints)              | Fora de escopo |
+| Reconciler de Plant                                                   | Pronto, testado com envtest                           |
+| Teste ponta a ponta no Kind                                           | Feito (planta + historian no host)                    |
+| Atuar na planta (setpoints)                                           | Fora de escopo                                        |
 
 ## Para rodar
 
