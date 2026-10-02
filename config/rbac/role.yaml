@@ -5,27 +5,28 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - infrastructure.greenlabs.io
+  - supervision.greenlabs.io
   resources:
-  - plcmachines
+  - costfunctions
+  - operatingpolicies
   verbs:
-  - create
-  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - supervision.greenlabs.io
+  resources:
+  - plants
+  verbs:
   - get
   - list
   - patch
   - update
   - watch
 - apiGroups:
-  - infrastructure.greenlabs.io
+  - supervision.greenlabs.io
   resources:
-  - plcmachines/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - infrastructure.greenlabs.io
-  resources:
-  - plcmachines/status
+  - plants/status
   verbs:
   - get
   - patch

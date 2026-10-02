@@ -22,7 +22,4 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the tep-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- plcmachine_admin_role.yaml
-- plcmachine_editor_role.yaml
-- plcmachine_viewer_role.yaml
 

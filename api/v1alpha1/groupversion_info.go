@@ -14,9 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains API Schema definitions for the infrastructure v1alpha1 API group.
+// Package v1alpha1 contains API Schema definitions for the supervision v1alpha1 API group.
+//
+// The group describes an industrial plant as seen by a supervisory layer: a CostFunction (the
+// declared objective function J), an OperatingPolicy (targets, constraints and a cost budget over
+// that function) and a Plant (which policy is active and whether the plant complies with it).
+// Nothing here is specific to a particular plant — plant knowledge lives only in the manifests.
 // +kubebuilder:object:generate=true
-// +groupName=infrastructure.greenlabs.io
+// +groupName=supervision.greenlabs.io
 package v1alpha1
 
 import (
@@ -26,7 +31,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "infrastructure.greenlabs.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "supervision.greenlabs.io", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

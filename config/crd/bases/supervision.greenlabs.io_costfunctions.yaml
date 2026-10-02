@@ -1,0 +1,112 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: costfunctions.supervision.greenlabs.io
+spec:
+  group: supervision.greenlabs.io
+  names:
+    kind: CostFunction
+    listKind: CostFunctionList
+    plural: costfunctions
+    shortNames:
+    - cf
+    singular: costfunction
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.unit
+      name: Unit
+      type: string
+    - jsonPath: .spec.reference
+      name: Reference
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CostFunction is a declared objective function over plant signals.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CostFunctionSpec declares the objective function J = Σ terms.
+            properties:
+              reference:
+                description: Reference is J at nominal operation, used for comparison
+                  in status.
+                type: number
+              source:
+                description: Source cites where the function comes from (paper, table).
+                type: string
+              terms:
+                description: Terms summed to compute J.
+                items:
+                  description: |-
+                    CostTerm is one additive term of the cost function: coefficient × Π mean(signal).
+
+                    A term with one signal is linear (e.g. price × compressor power). A term with two signals is a
+                    product (e.g. price × flow × composition). Unit conversions are folded into the coefficient.
+                  properties:
+                    coefficient:
+                      description: Coefficient multiplies the product of the signals'
+                        window means.
+                      type: number
+                    description:
+                      description: Description is free text, typically how the coefficient
+                        was derived.
+                      type: string
+                    name:
+                      description: Name identifies the term in status (e.g. "purge.A").
+                      minLength: 1
+                      type: string
+                    signals:
+                      description: Signals are historian keys (OPC-UA browse names,
+                        e.g. "xmeas.compressor.work").
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                  required:
+                  - coefficient
+                  - name
+                  - signals
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              unit:
+                description: Unit of J (e.g. "$/h").
+                minLength: 1
+                type: string
+            required:
+            - terms
+            - unit
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

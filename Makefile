@@ -10,7 +10,8 @@ endif
 
 # NOTA: docker-build, docker-push e docker-buildx estão comentados abaixo.
 # Builds de imagem são feitos localmente (Windows + Kind), não no Codespace.
-# O Codespace é usado apenas para: make generate, make manifests (controller-gen requer Linux).
+# make generate/manifests rodam no Windows: os paths do controller-gen são explícitos porque
+# paths="./..." falha no Windows ("no Go files").
 #
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # CONTAINER_TOOL ?= docker
@@ -56,11 +57,11 @@ proto: ## Generate Go stubs from plant.proto
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd:allowDangerousTypes=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd:allowDangerousTypes=true webhook paths="./api/v1alpha1" paths="./internal/controller" output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/v1alpha1"
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -78,7 +79,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= cluster-api-provider-plc-test-e2e
+KIND_CLUSTER ?= tep-operator-test-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist

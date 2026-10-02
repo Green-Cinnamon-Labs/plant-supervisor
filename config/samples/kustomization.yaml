@@ -1,4 +1,6 @@
 ## Append samples of your project ##
 resources:
-- infrastructure_v1alpha1_plcmachine.yaml
+- supervision_v1alpha1_costfunction.yaml
+- supervision_v1alpha1_operatingpolicy.yaml
+- supervision_v1alpha1_plant.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

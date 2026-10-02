@@ -1,0 +1,17 @@
+# Minimal, plant-agnostic example. The real TEP cost function (Downs & Vogel 1993, Table 9)
+# lives in tep-supervisor/local/k8s/tep/.
+apiVersion: supervision.greenlabs.io/v1alpha1
+kind: CostFunction
+metadata:
+  name: energy-cost
+spec:
+  unit: "$/h"
+  source: "example"
+  reference: 25.0
+  terms:
+    - name: pump-power
+      coefficient: 0.05        # $/kWh
+      signals: ["pump.power"]  # kW
+    - name: heating
+      coefficient: 0.03        # $/kg × steam flow
+      signals: ["heater.steam_flow"]

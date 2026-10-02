@@ -1,0 +1,138 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: operatingpolicies.supervision.greenlabs.io
+spec:
+  group: supervision.greenlabs.io
+  names:
+    kind: OperatingPolicy
+    listKind: OperatingPolicyList
+    plural: operatingpolicies
+    shortNames:
+    - op
+    singular: operatingpolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.costFunctionRef
+      name: CostFunction
+      type: string
+    - jsonPath: .spec.maxCost
+      name: MaxCost
+      type: number
+    - jsonPath: .spec.windowSeconds
+      name: Window
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: OperatingPolicy declares targets, constraints and a cost budget
+          over a CostFunction.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              OperatingPolicySpec is one way of operating the plant: what J must not exceed, which signals
+              must hit which targets, and which limits must hold.
+            properties:
+              constraints:
+                items:
+                  description: |-
+                    SignalConstraint asks a signal's window mean to stay within [Min, Max]. Either bound may be
+                    omitted.
+                  properties:
+                    max:
+                      type: number
+                    min:
+                      type: number
+                    signal:
+                      minLength: 1
+                      type: string
+                  required:
+                  - signal
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - signal
+                x-kubernetes-list-type: map
+              costFunctionRef:
+                description: CostFunctionRef names a CostFunction in the same namespace.
+                minLength: 1
+                type: string
+              description:
+                description: Description is free text (e.g. "Downs & Vogel mode 1,
+                  base case").
+                type: string
+              maxCost:
+                description: MaxCost is the budget for J. Omitted means J is observed
+                  but not judged.
+                type: number
+              persistenceEvaluations:
+                default: 1
+                description: |-
+                  PersistenceEvaluations is how many consecutive failing evaluations are needed before the
+                  plant is declared non-compliant (persistence rule from control-loop performance monitoring,
+                  Bradu et al. 2018), so short transients don't flip the verdict.
+                format: int32
+                minimum: 1
+                type: integer
+              targets:
+                items:
+                  description: SignalTarget asks a signal's window mean to stay within
+                    ±TolerancePercent of Value.
+                  properties:
+                    signal:
+                      minLength: 1
+                      type: string
+                    tolerancePercent:
+                      minimum: 0
+                      type: number
+                    value:
+                      type: number
+                  required:
+                  - signal
+                  - tolerancePercent
+                  - value
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - signal
+                x-kubernetes-list-type: map
+              windowSeconds:
+                default: 60
+                description: WindowSeconds is the averaging window requested from
+                  the historian.
+                format: int32
+                minimum: 1
+                type: integer
+            required:
+            - costFunctionRef
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

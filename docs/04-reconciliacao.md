@@ -1,102 +1,60 @@
 # 04 — Reconciliacao
 
-Esse doc descreve como o reconciler DEVE funcionar. A implementacao ainda nao existe (issue #38) — o controller hoje e um stub vazio. Isso aqui e o mapa.
-
 ## O que esse operator e
 
-NAO e um sincronizador de configuracao. E um **controlador supervisorio**. A planta vive sozinha, tem controladores PID rodando, sofre disturbios aleatorios. O operator:
+Um **observador supervisorio**, nao um atuador. Ele nunca escreve na planta. Cada ciclo responde uma pergunta: a planta esta cumprindo a politica ativa? A resposta vai para o `status` do `Plant`, e quem quiser saber (kubectl, tep-ihm) le de la pela API do Kubernetes.
 
-1. **Observa** — le XMEAS da planta via gRPC
-2. **Avalia** — compara com faixas aceitaveis e detecta tendencias
-3. **Decide** — se precisa intervir, qual regra dispara
-4. **Age** — executa a acao via gRPC (ou nao faz nada)
-5. **Registra** — grava o estado no .status como memoria pro proximo ciclo
-
-## Fluxo do reconcile
+## Fluxo de uma avaliacao
 
 ```
-Reconcile(PLCMachine) chamado
+Reconcile(Plant) chamado
   |
-  +- 1. Fetch PLCMachine CR do cluster
+  +- 1. Busca o Plant
   |
-  +- 2. Dial gRPC -> spec.plantAddress
-  |     -> se falha: phase = Pending, requeue com backoff
+  +- 2. Busca a OperatingPolicy de spec.policyRef
+  |     -> nao existe: Pending (PolicyNotFound)
   |
-  +- 3. GetPlantStatus() — le XMEAS da planta
-  |     -> recebe: xmeas[], plantTime, isdActive, alarms
+  +- 3. Busca a CostFunction de policy.spec.costFunctionRef
+  |     -> nao existe: Pending (CostFunctionNotFound)
   |
-  +- 4. Checar ISD (parada de emergencia)
-  |     -> se isdActive: phase = Shutdown, condition = Degraded, parar
+  +- 4. Junta os sinais necessarios (termos + metas + restricoes)
+  |     e pede ao historian: POST /aggregate {keys, window_s}
+  |     -> erro/timeout (5s): Pending (HistorianUnreachable)
+  |     -> historian sem planta: Pending (PlantDisconnected)
+  |     -> algum sinal sem amostra: Pending (MissingSignals)
   |
-  +- 5. Pra cada OperatingRange no spec:
-  |     +- Ler xmeas[range.xmeasIndex]
-  |     +- Comparar com .status.variables (valor anterior)
-  |     +- Calcular trend: Rising, Falling, ou Stable
-  |     +- Checar se ta dentro de [min, max]
-  |     +- Gravar em VariableStatus
+  +- 5. evaluate.Evaluate(costFunction, policy, medias)
+  |     +- J = Σ coefficient × Π media(sinal), mais a contribuicao de cada termo
+  |     +- CostWithinBudget: J <= maxCost
+  |     +- TargetsMet: |media - valor| <= valor × tolerancia
+  |     +- ConstraintsSatisfied: min <= media <= max
   |
-  +- 6. Avaliar responseRules:
-  |     +- Pra cada regra:
-  |     |    +- A variavel referenciada (watchRef) saiu da faixa?
-  |     |    +- A condition bate? (above_max / below_min)
-  |     |    +- Se sim: executar UpdateController(controllerID, parameter, value)
-  |     |    +- Gravar em lastAction
-  |     +- Se nenhuma regra disparou: nada a fazer
+  +- 6. Persistencia
+  |     +- avaliacao falhou: consecutiveViolations++ ; passou: zera
+  |     +- politica mudou desde a ultima avaliacao: contador recomeca
+  |     +- NonCompliant se consecutiveViolations >= persistenceEvaluations
   |
-  +- 7. Determinar phase:
-  |     +- Todas inRange + trends Stable -> Stable
-  |     +- Todas inRange + alguma trend Rising/Falling -> Transient
-  |     +- Alguma fora da faixa -> Alarm
-  |     +- isdActive -> Shutdown
+  +- 7. Grava status (phase, cost, terms, targets, constraints, conditions)
   |
-  +- 8. Gravar .status (memoria)
-  |     +- variables[] com valores, trends, inRange
-  |     +- phase
-  |     +- lastAction (se houve)
-  |     +- lastReconcileTime = now()
-  |
-  +- 9. Requeue adaptativo:
-        +- Phase Stable -> RequeueAfter(baseMs)
-        +- Phase Transient -> RequeueAfter(transientMs)
-        +- Phase Alarm -> RequeueAfter(transientMs)
-        +- Phase Shutdown -> nao requeue (nada a fazer)
+  +- 8. RequeueAfter(evaluationIntervalSeconds)
 ```
 
-## Deteccao de tendencia
+O passo 5 e o passo 6 sao funcoes puras em `internal/evaluate` — o resto e encanamento.
 
-O operator compara o valor atual com o anterior (gravado no .status):
+## Quando o reconcile roda
 
-```
-delta = atual - anterior
-threshold = 0.5% do range (max - min)
+- **Periodicamente**: cada avaliacao termina com `RequeueAfter(evaluationIntervalSeconds)`.
+- **Quando o spec do Plant muda** (ex.: `kubectl edit plant tep` trocando `policyRef`). Mudancas so de `status` sao ignoradas (`GenerationChangedPredicate`), senao o operator se re-dispararia a cada escrita do proprio veredito.
+- **Quando uma OperatingPolicy ou CostFunction muda**: todos os Plants do namespace sao reavaliados na hora, sem esperar o proximo intervalo. Simples e suficiente para o lab (poucos Plants por namespace).
 
-se |delta| < threshold -> Stable
-se delta > 0           -> Rising
-se delta < 0           -> Falling
-```
+## Por que o operator nao fala OPC-UA
 
-O threshold e relativo a faixa — uma variacao de 0.1 pode ser irrelevante pra pressao (range de 200) mas significativa pra nivel (range de 20).
+Ate a versao anterior (`PLCMachine`), o operator falava gRPC direto com a planta. Agora ele so conversa com o historian. Motivos:
 
-## Intervalo adaptativo
-
-O operator nao faz polling fixo. Se detecta transitorio:
-
-| Situacao                       | Intervalo             |
-|--------------------------------|-----------------------|
-| Tudo estavel, tudo em faixa    | baseMs (default 2s)   |
-| Transitorio detectado          | transientMs (200ms)   |
-| Variavel fora da faixa (Alarm) | transientMs (200ms)   |
-| ISD (Shutdown)                 | Para de monitorar     |
+- **Genericidade**: o operator nao precisa saber o protocolo nem a estrutura da planta. Outra planta, com outro protocolo, so precisa de um historian que responda `/aggregate`.
+- **Separacao de papeis**: o historian interpreta sinais (janela, media, desvio padrao); o operator fala Kubernetes (spec, status, conditions).
+- **Estatistica fora do loop do k8s**: metodos mais pesados (ex.: indices de desempenho de malha, como Harris ou o Predictability Index) cabem no historian sem mudar o operator — ele so passaria a ler um numero a mais.
 
 ## Idempotencia
 
-Se o operator disparar a mesma regra duas vezes seguidas (ex: pressao continua acima do max), a segunda chamada a UpdateController com o mesmo valor e um no-op. O gRPC server da planta trata isso.
-
-## O que NAO e responsabilidade do operator
-
-- **Calculo PID**: quem calcula saida dos controladores e a planta (ControllerBank no Rust). O operator so ajusta PARAMETROS (ganho, setpoint).
-- **Criar/destruir controllers**: existem na planta, o operator so ajusta parametros.
-- **Controlar disturbios**: disturbios sao aleatorios. O operator reage aos efeitos, nao causa.
-- **Criar/destruir a planta**: a planta e um Pod separado. O operator assume que ela ja ta rodando.
-- **Historico**: o operator lida com o agora e o "um passo atras" (pro trend). Historico longo e job de Prometheus/Grafana.
-- **Sincronizar config**: o operator nao empurra parametros do spec pra planta. Ele le o estado, avalia, e decide. A decisao pode ser "nao fazer nada".
+Cada avaliacao recalcula tudo a partir das medias atuais; o unico estado carregado entre avaliacoes e `consecutiveViolations` (e `activePolicy`, para detectar troca de politica). Se o Pod do operator reiniciar, ele continua de onde o `status` parou.

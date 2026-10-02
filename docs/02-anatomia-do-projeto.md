@@ -6,89 +6,77 @@ O Kubebuilder gera um monte de arquivo quando voce roda o scaffold. A maioria e 
 
 ### Arquivos que voce EDITA
 
-Esses sao os que carregam a logica do projeto:
+```
+api/v1alpha1/
+  costfunction_types.go       ← CONTRATO: a funcao de custo declarada (lista de termos).
+  operatingpolicy_types.go    ← CONTRATO: metas, restricoes, orcamento, persistencia.
+  plant_types.go              ← CONTRATO: qual politica esta ativa + o veredito (status).
+  groupversion_info.go        ← Grupo supervision.greenlabs.io/v1alpha1.
+internal/
+  evaluate/                   ← A CONTA. Funcoes puras: J, metas, restricoes, persistencia.
+  historian/                  ← Cliente HTTP do tep-historian (POST /aggregate).
+  controller/
+    plant_controller.go       ← O CORACAO. Busca os objetos, chama historian e evaluate, grava status.
+config/samples/               ← Exemplos genericos (nao-TEP) das 3 CRDs.
+cmd/main.go                   ← Entry point do manager. Registra o PlantReconciler.
+```
 
-```
-api/v1alpha1/plcmachine_types.go            ← O CONTRATO. Define spec e status da CRD.
-internal/controller/
-  plcmachine_controller.go                  ← O CORACAO. Logica de reconciliacao.
-config/samples/
-  infrastructure_v1alpha1_plcmachine.yaml   ← Exemplo de CR (como o usuario usa a CRD).
-cmd/main.go                                 ← Entry point do manager. Ja esta ok.
-Makefile                                    ← Build, test, deploy. Ja esta ok.
-Dockerfile                                  ← Build da imagem do operator. Ja esta ok.
-```
+A separacao `evaluate` x `controller` e de proposito: toda a aritmetica da tese (J, veredito) esta em `internal/evaluate`, sem Kubernetes nem HTTP, e e la que os testes se concentram. O controller so faz encanamento.
 
 ### Arquivos AUTO-GERADOS (nao edite)
 
-Esses sao regenerados toda vez que voce roda `make manifests` ou `make generate`:
+Regenerados toda vez que voce roda `make generate manifests`:
 
 ```
-api/v1alpha1/zz_generated.deepcopy.go           ← DeepCopy. Gerado a partir dos types.
-config/crd/bases/
-  infrastructure.greenlabs.io_plcmachines.yaml  ← O YAML da CRD. Gerado dos markers +kubebuilder.
-config/rbac/role.yaml                           ← Permissoes do controller. Gerado dos markers +kubebuilder:rbac.
-config/rbac/role_binding.yaml                   ← Binding. Auto-gerado.
-config/rbac/service_account.yaml                ← SA. Auto-gerado.
+api/v1alpha1/zz_generated.deepcopy.go    ← DeepCopy. Gerado a partir dos types.
+config/crd/bases/supervision.greenlabs.io_*.yaml  ← YAML das 3 CRDs. Gerado dos markers +kubebuilder.
+config/rbac/role.yaml                    ← Permissoes do controller. Gerado dos markers +kubebuilder:rbac.
 ```
 
-**Regra de ouro**: se o arquivo tem `DO NOT EDIT` no topo ou comeca com `zz_`, nao mexe nele. Edita o source (types.go ou controller.go) e roda `make manifests generate`.
+**Regra de ouro**: se o arquivo tem `DO NOT EDIT` no topo ou comeca com `zz_`, nao mexe nele. Edita o source (types.go ou controller.go) e roda `make generate manifests`.
 
-### Outros arquivos que ficaram
+### Outros arquivos
 
 ```
 hack/boilerplate.go.txt     ← Header de licenca pros arquivos gerados. controller-gen precisa dele.
-PROJECT                     ← Metadados do Kubebuilder. Nao edite — o CLI usa isso internamente.
-.gitignore / .dockerignore  ← Ignore rules.
+PROJECT                     ← Metadados do Kubebuilder.
 go.mod / go.sum             ← Dependencias Go.
 ```
 
 ## Os markers `+kubebuilder:`
 
-Esses comentarios magicos nos arquivos Go nao sao decoracao — o `controller-gen` le eles e gera o CRD YAML, RBAC, validacoes, etc.
+Esses comentarios magicos nos arquivos Go nao sao decoracao — o `controller-gen` le eles e gera o CRD YAML, RBAC, validacoes, etc. Por isso eles tem que continuar sendo comentarios `//`.
 
-Exemplos no `plcmachine_types.go`:
-
-```go
-// +kubebuilder:validation:Enum=P;PI;PID       → gera enum no OpenAPI schema
-// +kubebuilder:validation:Minimum=0            → gera min no schema
-// +kubebuilder:validation:Maximum=21           → gera max no schema
-// +kubebuilder:default=true                    → valor default no schema
-// +kubebuilder:subresource:status              → habilita /status subresource
-// +kubebuilder:printcolumn:name="Phase",...    → colunas no kubectl get
-```
-
-E no `plcmachine_controller.go`:
+Exemplos nos types:
 
 ```go
-// +kubebuilder:rbac:groups=infrastructure.greenlabs.io,resources=plcmachines,...
+// +kubebuilder:validation:MinItems=1           → lista nao pode ser vazia
+// +kubebuilder:validation:Minimum=1            → min no schema
+// +kubebuilder:default=60                      → valor default no schema
+// +kubebuilder:subresource:status              → habilita /status subresource (so no Plant)
+// +kubebuilder:printcolumn:name="Cost",...     → colunas no kubectl get
+// +listType=map / +listMapKey=name             → itens de lista identificados por chave
 ```
 
-**Ciclo de vida**: edita os markers → roda `make manifests` → YAML atualizado.
+E no `plant_controller.go`:
+
+```go
+// +kubebuilder:rbac:groups=supervision.greenlabs.io,resources=plants,...
+```
+
+**Ciclo de vida**: edita os markers → roda `make generate manifests` → YAML atualizado.
 
 ## Fluxo de build
 
 ```
 make generate     → gera zz_generated.deepcopy.go
 make manifests    → gera CRD YAML + RBAC YAML a partir dos markers
+make test         → testes unitarios + envtest (baixa etcd/kube-apiserver em bin/)
 make build        → compila o binario do manager
-make docker-build → imagem Docker
-make install      → aplica CRDs no cluster
-make deploy       → deploy completo (CRD + RBAC + Deployment)
+docker build -t tep-operator:latest .
 ```
 
-No Windows sem `make`, os comandos equivalentes sao:
-
-```bash
-# generate
-controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-# manifests
-controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-
-# build
-go build -o bin/manager cmd/main.go
-```
+**Windows**: `make generate manifests` funciona, mas o Makefile passa os pacotes explicitamente (`paths="./api/v1alpha1" paths="./internal/controller"`) porque `paths="./..."` falha no Windows ("no Go files"). Se criar um pacote novo com markers, adicione o path no Makefile. O envtest tambem roda no Windows; o unico porem e que ele nao consegue encerrar etcd/kube-apiserver no fim (o `AfterSuite` ignora esse erro so no Windows).
 
 ## O que foi removido do scaffold original
 
@@ -104,7 +92,6 @@ Pra um lab, isso e peso morto. Removemos em marco/2026:
 | `.golangci.yml`          | Config do golangci-lint (24 linters)           | Overkill pro lab. `go vet` resolve                              |
 | `.custom-gcl.yml`        | Plugin custom do linter (logcheck)             | Overkill                                                        |
 | `AGENTS.md`              | Guia generico do Kubebuilder pra agentes de IA | Substituido pelos nossos `docs/`                                |
-| `bin/`                   | Binarios baixados (controller-gen)             | Regenera com `go install` quando quiser                         |
 
 Tambem simplificamos `config/default/kustomization.yaml` — era 235 linhas de boilerplate
 comentado (webhooks, cert-manager, etc). Ficou com ~15 linhas, so o que esta ativo.
