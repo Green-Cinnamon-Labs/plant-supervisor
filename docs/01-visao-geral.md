@@ -17,16 +17,18 @@ tep-supervisor          <- infra (Kind, compose) e os manifestos TEP
 tep-ihm                 <- dashboard; le o veredito do Plant pela API do K8s
 ```
 
-```
- tep-plant ──OPC-UA──▶ tep-historian ◀──POST /aggregate── tep-operator (Pod no Kind)
- (:4840)               (medias por janela, :8090)              │
-                                                               │ escreve o veredito
-                                                               ▼
-                                         API do Kubernetes: Plant.status
-                                                               │
-                                                               │ watch
-                                                               ▼
-                                                     tep-ihm / kubectl
+```mermaid
+flowchart LR
+    Plant["tep-plant (OPC-UA :4840)"]
+    Historian["tep-historian (medias por janela, :8090)"]
+    Operator["tep-operator (Pod no Kind)"]
+    API["API do Kubernetes: Plant.status"]
+    IHM["tep-ihm / kubectl"]
+
+    Plant -->|"OPC-UA"| Historian
+    Operator -->|"POST /aggregate"| Historian
+    Operator -->|"escreve o veredito"| API
+    API -->|"watch"| IHM
 ```
 
 O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operator traduz estatisticas em veredito, e o k8s guarda o veredito e avisa quem estiver observando.
