@@ -20,12 +20,12 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
 )
 
 // downsVogel builds the Downs & Vogel (1993) Table 9 operating cost as declared terms. The
 // operator knows nothing about TEP; this is only test data, mirroring the manifest that lives in
-// tep-supervisor.
+// tep-lab.
 //
 //	J = Σ cost_i · (x_purge_i/100) · 44.79 · F_purge      (purge, kscmh → kgmol/h)
 //	  + Σ cost_i · (x_prod_i/100)  · 9.21  · F_product    (product D, E, F; m³/h → kgmol/h)

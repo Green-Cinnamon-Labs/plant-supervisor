@@ -73,7 +73,7 @@ make generate     → gera zz_generated.deepcopy.go
 make manifests    → gera CRD YAML + RBAC YAML a partir dos markers
 make test         → testes unitarios + envtest (baixa etcd/kube-apiserver em bin/)
 make build        → compila o binario do manager
-make docker-build  → imagem tep-operator:latest (IMG=... para outro nome)
+make docker-build  → imagem plant-supervisor:latest (IMG=... para outro nome)
 ```
 
 **Windows**: `make generate manifests` funciona, mas o Makefile passa os pacotes explicitamente (`paths="./api/v1alpha1" paths="./internal/controller"`) porque `paths="./..."` falha no Windows ("no Go files"). Se criar um pacote novo com markers, adicione o path no Makefile. O envtest tambem roda no Windows; o unico porem e que ele nao consegue encerrar etcd/kube-apiserver no fim (o `AfterSuite` ignora esse erro so no Windows).

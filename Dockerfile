@@ -1,5 +1,5 @@
-# docker build -t tep-operator:latest .
-# docker run --rm tep-operator:latest
+# docker build -t plant-supervisor:latest .
+# docker run --rm plant-supervisor:latest
 #
 # Build the manager binary
 FROM golang:1.25 AS builder

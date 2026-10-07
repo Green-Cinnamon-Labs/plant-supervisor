@@ -1,5 +1,5 @@
-namespace: tep-operator-system
-namePrefix: tep-operator-
+namespace: plant-supervisor-system
+namePrefix: plant-supervisor-
 
 resources:
 - ../crd
