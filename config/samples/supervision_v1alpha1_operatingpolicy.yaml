@@ -1,0 +1,17 @@
+apiVersion: supervision.greenlabs.io/v1alpha1
+kind: OperatingPolicy
+metadata:
+  name: normal-operation
+spec:
+  costFunctionRef: energy-cost
+  description: "Example policy"
+  windowSeconds: 60
+  maxCost: 30.0
+  persistenceEvaluations: 3
+  targets:
+    - signal: tank.level
+      value: 50.0
+      tolerancePercent: 10
+  constraints:
+    - signal: tank.pressure
+      max: 300.0

@@ -1,5 +1,5 @@
-# docker build -t plc-operator:latest .
-# docker run --rm plc-operator:latest
+# docker build -t tep-operator:latest .
+# docker run --rm tep-operator:latest
 #
 # Build the manager binary
 FROM golang:1.25 AS builder

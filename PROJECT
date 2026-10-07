@@ -6,16 +6,32 @@ cliVersion: 4.12.0
 domain: greenlabs.io
 layout:
 - go.kubebuilder.io/v4
-projectName: cluster-api-provider-plc
-repo: github.com/Green-Cinnamon-Labs/cluster-api-provider-plc
+projectName: tep-operator
+repo: github.com/Green-Cinnamon-Labs/tep-operator
 resources:
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
   domain: greenlabs.io
-  group: infrastructure
-  kind: PLCMachine
-  path: github.com/Green-Cinnamon-Labs/cluster-api-provider-plc/api/v1alpha1
+  group: supervision
+  kind: Plant
+  path: github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: greenlabs.io
+  group: supervision
+  kind: OperatingPolicy
+  path: github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: greenlabs.io
+  group: supervision
+  kind: CostFunction
+  path: github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

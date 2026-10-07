@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= tep-operator:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -8,12 +8,11 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-# NOTA: docker-build, docker-push e docker-buildx estão comentados abaixo.
-# Builds de imagem são feitos localmente (Windows + Kind), não no Codespace.
-# O Codespace é usado apenas para: make generate, make manifests (controller-gen requer Linux).
-#
+# make generate/manifests rodam no Windows: os paths do controller-gen são explícitos porque
+# paths="./..." falha no Windows ("no Go files"). Pacote novo com markers → adicionar o path aqui.
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
-# CONTAINER_TOOL ?= docker
+CONTAINER_TOOL ?= docker
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -40,27 +39,15 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-##@ Proto
-
-GOMOD=github.com/Green-Cinnamon-Labs/tep-operator
-
-.PHONY: proto
-proto: ## Generate Go stubs from plant.proto
-	mkdir -p internal/grpc/gen/tepv1
-	protoc --go_out=. --go_opt=module=$(GOMOD) \
-		--go-grpc_out=. --go-grpc_opt=module=$(GOMOD) \
-		--proto_path=proto \
-		tep/v1/plant.proto
-
 ##@ Development
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd:allowDangerousTypes=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd:allowDangerousTypes=true webhook paths="./api/v1alpha1" paths="./internal/controller" output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/v1alpha1"
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -78,7 +65,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= cluster-api-provider-plc-test-e2e
+KIND_CLUSTER ?= tep-operator-test-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -125,24 +112,9 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
-# --- Targets de Docker comentados: rodar localmente com `docker build -t plc-operator:latest .` ---
-# .PHONY: docker-build
-# docker-build: ## Build docker image with the manager.
-# 	$(CONTAINER_TOOL) build -t ${IMG} .
-#
-# .PHONY: docker-push
-# docker-push: ## Push docker image with the manager.
-# 	$(CONTAINER_TOOL) push ${IMG}
-#
-# PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-# .PHONY: docker-buildx
-# docker-buildx: ## Build and push docker image for the manager for cross-platform support
-# 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-# 	- $(CONTAINER_TOOL) buildx create --name tep-operator-builder
-# 	$(CONTAINER_TOOL) buildx use tep-operator-builder
-# 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-# 	- $(CONTAINER_TOOL) buildx rm tep-operator-builder
-# 	rm Dockerfile.cross
+.PHONY: docker-build
+docker-build: ## Build docker image with the manager (load into Kind with `kind load docker-image`).
+	$(CONTAINER_TOOL) build -t ${IMG} .
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.

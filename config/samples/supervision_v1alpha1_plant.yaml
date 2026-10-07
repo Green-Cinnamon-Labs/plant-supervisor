@@ -1,0 +1,8 @@
+apiVersion: supervision.greenlabs.io/v1alpha1
+kind: Plant
+metadata:
+  name: example-plant
+spec:
+  historianURL: "http://historian:8090"
+  policyRef: normal-operation
+  evaluationIntervalSeconds: 30

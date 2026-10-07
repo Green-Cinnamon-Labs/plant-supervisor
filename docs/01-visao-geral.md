@@ -2,54 +2,59 @@
 
 ## O que e esse repo?
 
-Esse e o **operator Kubernetes** que atua como controlador supervisorio da planta TEP (Tennessee Eastman Process). O nome `tep-operator` vem da analogia com os providers do Cluster API — assim como o CAPA provisiona maquinas na AWS, esse provider supervisiona controladores numa planta industrial via gRPC.
+Esse e o **operator Kubernetes** que da a um cluster a capacidade de acompanhar uma planta industrial em alto nivel. Ele nao le sinais brutos e nao atua na planta. Ele recebe, por manifesto, uma **funcao de custo** (a funcao objetivo J) e uma **politica de operacao** (metas, restricoes, orcamento de custo), e reporta no `status` do objeto `Plant` se a planta esta cumprindo a politica ativa.
 
-A planta vive sozinha — tem controladores PID ja rodando e sofre disturbios aleatorios. O operator nao empurra configuracao. Ele **observa** as variaveis medidas (XMEAS) via gRPC, **avalia** se estao dentro de faixas aceitaveis, **decide** se precisa intervir, e **age** ajustando parametros dos controladores existentes. Se a planta esta estavel, nao faz nada.
+O operator e **generico**: nao ha nada de TEP no codigo Go. Todo conhecimento especifico da planta mora nos manifestos (no caso do TEP, em `tep-supervisor/local/k8s/tep/`). O TEP e o primeiro caso de uso.
 
 ## Onde esse repo se encaixa
 
-O lab tem 4 repositorios:
-
 ```
-spec-tennessee-eastman       <- issues, specs, decisoes de arquitetura
-tep-plant        <- a planta (Rust) + gRPC server
-tep-operator     <- ESTE REPO: o operator K8s (Go)
-tep-supervisor           <- infra do cluster (Kind, manifests de deploy)
+spec-tennessee-eastman  <- issues, specs, decisoes de arquitetura (epic #77)
+tep-plant               <- a planta (Rust), publica sinais via OPC-UA
+tep-historian           <- coleta os sinais e serve medias por janela via HTTP
+tep-operator            <- ESTE REPO: o operator K8s (Go)
+tep-supervisor          <- infra (Kind, compose) e os manifestos TEP
+tep-ihm                 <- dashboard; le o veredito do Plant pela API do K8s
 ```
-
-O fluxo e:
 
 ```mermaid
 flowchart LR
-    CRD["CRD: PLCMachine<br/>.spec = politica supervisoria (faixas, regras)<br/>.status = memoria do operator (leituras, trends)"]
+    Plant["tep-plant (OPC-UA :4840)"]
+    Historian["tep-historian (medias por janela, :8090)"]
+    Operator["tep-operator (Pod no Kind)"]
+    API["API do Kubernetes: Plant.status"]
+    IHM["tep-ihm / kubectl"]
 
-    Operator["Operator<br/>(este repo)<br/>Observa > Avalia > Decide > Age"]
-    Plant["Planta (Rust)<br/>te_service"]
-
-    CRD -->|reconcile loop| Operator
-    Operator -->|gRPC :50051| Plant
-    Plant -->|XMEAS readings| Operator
+    Plant -->|"OPC-UA"| Historian
+    Operator -->|"POST /aggregate"| Historian
+    Operator -->|"escreve o veredito"| API
+    API -->|"watch"| IHM
 ```
+
+O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operator traduz estatisticas em veredito, e o k8s guarda o veredito e avisa quem estiver observando.
 
 ## Tecnologia
 
 - **Go 1.25+** com **Kubebuilder 4.12** (controller-runtime v0.23)
-- API group: `infrastructure.greenlabs.io/v1alpha1`
-- CRD unica: `PLCMachine`
-- Comunicacao com a planta: **gRPC** (proto definido no repo `tep-plant`)
+- API group: `supervision.greenlabs.io/v1alpha1`
+- 3 CRDs: `CostFunction`, `OperatingPolicy`, `Plant` (ver [03](03-crds.md))
+- Fonte de dados: `tep-historian` via HTTP/JSON
 
-## O que ja esta pronto
+## Estado atual
 
-| O que                        | Status         |
-|------------------------------|----------------|
-| Scaffold do Kubebuilder      | Completo       |
-| CRD PLCMachine (types)       | Redesenhada (supervisoria) |
-| Reconciler                   | Stub (vazio)   |
-| RBAC, Kustomize, Deployment  | Auto-gerado    |
-| Dockerfile do operator       | Pronto         |
-| Testes unitarios             | Template       |
-| Testes E2E                   | Template       |
+| O que                                                                 | Status                                                |
+| --------------------------------------------------------------------- | ----------------------------------------------------- |
+| CRDs Plant / OperatingPolicy / CostFunction                           | Pronto                                                |
+| Avaliacao de J, metas, restricoes, persistencia (`internal/evaluate`) | Pronto, testado (caso base Downs & Vogel = 170.6 $/h) |
+| Reconciler de Plant                                                   | Pronto, testado com envtest                           |
+| Teste ponta a ponta no Kind                                           | Feito (planta + historian no host)                    |
+| Atuar na planta (setpoints)                                           | Fora de escopo                                        |
 
-## Proximo passo
+## Para rodar
 
-Implementar o reconciler (issue #38) — o loop supervisorio que conecta via gRPC na planta, le XMEAS, avalia faixas, e decide se precisa ajustar parametros.
+```bash
+make generate manifests                       # regenera deepcopy, CRDs e RBAC
+make test                                     # unitarios + envtest
+make docker-build
+# deploy no Kind: ver tep-supervisor/local/setup.sh
+```
