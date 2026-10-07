@@ -34,7 +34,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	supervisionv1alpha1 "github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
+	supervisionv1alpha1 "github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

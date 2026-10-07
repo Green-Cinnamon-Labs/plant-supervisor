@@ -2,9 +2,11 @@
 
 ## O que e esse repo?
 
-Esse e o **operator Kubernetes** que da a um cluster a capacidade de acompanhar uma planta industrial em alto nivel. Ele nao le sinais brutos e nao atua na planta. Ele recebe, por manifesto, uma **funcao de custo** (a funcao objetivo J) e uma **politica de operacao** (metas, restricoes, orcamento de custo), e reporta no `status` do objeto `Plant` se a planta esta cumprindo a politica ativa.
+Esse e o **supervisor** do laboratorio: um controller Kubernetes (construido com o padrao *Operator*) que da a um cluster a capacidade de acompanhar uma planta industrial em alto nivel. Ele nao le sinais brutos e nao atua na planta. Ele recebe, por manifesto, uma **funcao de custo** (a funcao objetivo J) e uma **politica de operacao** (metas, restricoes, orcamento de custo), e reporta no `status` do objeto `Plant` se a planta esta cumprindo a politica ativa.
 
-O operator e **generico**: nao ha nada de TEP no codigo Go. Todo conhecimento especifico da planta mora nos manifestos (no caso do TEP, em `tep-supervisor/local/k8s/tep/`). O TEP e o primeiro caso de uso.
+O supervisor e **generico**: nao ha nada de TEP no codigo Go. Todo conhecimento especifico da planta mora nos manifestos (no caso do TEP, em `tep-lab/local/k8s/tep/`). O TEP e o primeiro caso de uso.
+
+Por que o nome: em automacao, "operador" e quem atua na planta, e este componente nunca atua — ele supervisiona (a camada supervisoria da hierarquia de Skogestad). E ele nao e especifico do TEP, por isso nao tem o prefixo `tep-`. Ate a issue #83 ele se chamava `tep-operator`.
 
 ## Onde esse repo se encaixa
 
@@ -12,8 +14,8 @@ O operator e **generico**: nao ha nada de TEP no codigo Go. Todo conhecimento es
 spec-tennessee-eastman  <- issues, specs, decisoes de arquitetura (epic #77)
 tep-plant               <- a planta (Rust), publica sinais via OPC-UA
 tep-historian           <- coleta os sinais e serve medias por janela via HTTP
-tep-operator            <- ESTE REPO: o operator K8s (Go)
-tep-supervisor          <- infra (Kind, compose) e os manifestos TEP
+plant-supervisor            <- ESTE REPO: o operator K8s (Go)
+tep-lab          <- infra (Kind, compose) e os manifestos TEP
 tep-ihm                 <- dashboard; le o veredito do Plant pela API do K8s
 ```
 
@@ -21,7 +23,7 @@ tep-ihm                 <- dashboard; le o veredito do Plant pela API do K8s
 flowchart LR
     Plant["tep-plant (OPC-UA :4840)"]
     Historian["tep-historian (medias por janela, :8090)"]
-    Operator["tep-operator (Pod no Kind)"]
+    Operator["plant-supervisor (Pod no Kind)"]
     API["API do Kubernetes: Plant.status"]
     IHM["tep-ihm / kubectl"]
 
@@ -56,5 +58,5 @@ O k8s nunca ve sinal bruto. O historian traduz sinais em estatisticas, o operato
 make generate manifests                       # regenera deepcopy, CRDs e RBAC
 make test                                     # unitarios + envtest
 make docker-build
-# deploy no Kind: ver tep-supervisor/local/setup.sh
+# deploy no Kind: ver tep-lab/local/setup.sh
 ```

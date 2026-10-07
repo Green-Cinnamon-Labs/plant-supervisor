@@ -34,9 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
-	"github.com/Green-Cinnamon-Labs/tep-operator/internal/evaluate"
-	"github.com/Green-Cinnamon-Labs/tep-operator/internal/historian"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/evaluate"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/historian"
 )
 
 // Historian is what the reconciler needs from a historian; tests substitute a fake.

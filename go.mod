@@ -1,4 +1,4 @@
-module github.com/Green-Cinnamon-Labs/tep-operator
+module github.com/Green-Cinnamon-Labs/plant-supervisor
 
 go 1.25.3
 

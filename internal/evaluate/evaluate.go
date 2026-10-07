@@ -27,7 +27,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
 )
 
 // Result is the instantaneous (non-persistence-filtered) evaluation of one window.

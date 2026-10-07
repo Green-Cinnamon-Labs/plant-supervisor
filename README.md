@@ -1,15 +1,17 @@
-# tep-operator
+# plant-supervisor
 
-Kubernetes operator that lets a cluster follow an industrial plant at a high level. The user declares a **cost function** (the objective function J) and an **operating policy** (targets, constraints, cost budget) as manifests; the operator evaluates the plant against the active policy and writes the verdict to the `Plant` status. It never writes to the plant.
+The **supervisory layer** of the lab: a Kubernetes controller that lets a cluster follow an industrial plant at a high level. The user declares a **cost function** (the objective function J) and an **operating policy** (targets, constraints, cost budget) as manifests; the supervisor evaluates the plant against the active policy and writes the verdict to the `Plant` status. It never writes to the plant.
 
-The operator is **plant-agnostic**: there is nothing TEP-specific in the Go code. Plant knowledge lives only in the manifests — for TEP, in `tep-supervisor/local/k8s/tep/` (Downs & Vogel cost function, mode 1 policy).
+Why the name: it is built with the Kubernetes *Operator* pattern, but in industrial automation an "operator" acts on the plant, and this component never does — it supervises, the role of the supervisory layer in the plant-wide control hierarchy (Skogestad). And it is not TEP-specific, so the name has no `tep-` prefix. It was called `tep-operator` until spec issue #83.
+
+The operator is **plant-agnostic**: there is nothing TEP-specific in the Go code. Plant knowledge lives only in the manifests — for TEP, in `tep-lab/local/k8s/tep/` (Downs & Vogel cost function, mode 1 policy).
 
 ## Context
 
 Part of the **TEP CPS Lab** (Tennessee Eastman Process as a Cyber-Physical System, not a "digital twin" — there is no physical reference plant).
 
 ```
-tep-plant ──OPC-UA──▶ tep-historian ──HTTP──▶ tep-operator ──▶ Plant.status ──▶ kubectl / tep-ihm
+tep-plant ──OPC-UA──▶ tep-historian ──HTTP──▶ plant-supervisor ──▶ Plant.status ──▶ kubectl / tep-ihm
 ```
 
 Kubernetes never sees raw signals. `tep-historian` turns signals into window statistics, the operator turns statistics into a verdict, and Kubernetes stores the verdict and notifies whoever watches it.
@@ -24,7 +26,7 @@ make test                 # unit + envtest
 make docker-build
 ```
 
-Deploying to Kind with the TEP manifests: `tep-supervisor/local/setup.sh`.
+Deploying to Kind with the TEP manifests: `tep-lab/local/setup.sh`.
 
 ## CRDs
 
@@ -62,8 +64,8 @@ Generic samples: [config/samples/](config/samples/). Full details: [docs/03-crds
 | [spec-tennessee-eastman](https://github.com/Green-Cinnamon-Labs/spec-tennessee-eastman) | Issues, specs, decisions (epic #77)            |
 | [tep-plant](https://github.com/Green-Cinnamon-Labs/tep-plant)                           | TEP plant (Rust), signals over OPC-UA          |
 | tep-historian                                                                           | OPC-UA collector, window statistics over HTTP  |
-| **tep-operator**                                                                        | **This repo** — K8s operator (Go)              |
-| [tep-supervisor](https://github.com/Green-Cinnamon-Labs/tep-supervisor)                 | Cluster infra (Kind, compose) + TEP manifests  |
+| **plant-supervisor**                                                                        | **This repo** — K8s operator (Go)              |
+| [tep-lab](https://github.com/Green-Cinnamon-Labs/tep-lab)                 | Cluster infra (Kind, compose) + TEP manifests  |
 | [tep-ihm](https://github.com/Green-Cinnamon-Labs/tep-ihm)                               | Dashboard; reads the verdict from `Plant.status` |
 
 ## Structure

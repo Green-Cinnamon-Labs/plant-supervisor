@@ -1,5 +1,5 @@
 # Minimal, plant-agnostic example. The real TEP cost function (Downs & Vogel 1993, Table 9)
-# lives in tep-supervisor/local/k8s/tep/.
+# lives in tep-lab/local/k8s/tep/.
 apiVersion: supervision.greenlabs.io/v1alpha1
 kind: CostFunction
 metadata:

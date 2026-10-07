@@ -28,8 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
-	"github.com/Green-Cinnamon-Labs/tep-operator/internal/historian"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/historian"
 )
 
 // fakeHistorian returns fixed means, or an error.

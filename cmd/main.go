@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	supervisionv1alpha1 "github.com/Green-Cinnamon-Labs/tep-operator/api/v1alpha1"
-	"github.com/Green-Cinnamon-Labs/tep-operator/internal/controller"
+	supervisionv1alpha1 "github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
+	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

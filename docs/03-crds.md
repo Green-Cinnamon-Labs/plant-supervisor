@@ -35,7 +35,7 @@ spec:
 - Os nomes de sinal sao as chaves que o historian conhece (browse names OPC-UA da planta).
 - **Aproximacao conhecida**: um termo produto usa `media(a) × media(b)`, nao `media(a × b)`. Os dois coincidem quando os sinais estao estaveis na janela, que e o regime que um custo economico descreve.
 
-Exemplo completo (os 12 termos do TEP): `tep-supervisor/local/k8s/tep/cost-function-downs-vogel.yaml`.
+Exemplo completo (os 12 termos do TEP): `tep-lab/local/k8s/tep/cost-function-downs-vogel.yaml`.
 
 ## OperatingPolicy
 
