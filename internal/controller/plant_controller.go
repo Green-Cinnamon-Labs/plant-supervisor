@@ -39,22 +39,16 @@ import (
 	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/historian"
 )
 
-// Historian is what the reconciler needs from a historian; tests substitute a fake.
-type Historian interface {
-	Aggregate(ctx context.Context, keys []string, window time.Duration) (*historian.AggregateResponse, error)
-}
-
 // PlantReconciler evaluates each Plant against its active OperatingPolicy.
 //
-// One evaluation: Plant → OperatingPolicy → CostFunction → historian window means → J, targets,
-// constraints → persistence rule → status. It never writes to the plant; the only output is the
-// Plant's status, which kubectl and tep-ihm read through the Kubernetes API.
+// One evaluation has two observation levels. Economic: Plant → OperatingPolicy → CostFunction →
+// historian window means → J, targets, constraints → persistence rule → phase and PolicyCompliant.
+// Control quality: the policy's control loops → historian Predictability Index → thresholds →
+// ControlLoopsHealthy (never affects the phase). It never writes to the plant; the only output is
+// the Plant's status, which kubectl and tep-ihm read through the Kubernetes API.
 type PlantReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-
-	// NewHistorian builds a historian client for a URL. Defaults to historian.New.
-	NewHistorian func(url string) Historian
 }
 
 // +kubebuilder:rbac:groups=supervision.greenlabs.io,resources=plants,verbs=get;list;watch;update;patch
@@ -92,8 +86,9 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if window <= 0 {
 		window = 60 * time.Second
 	}
+	hist := historian.New(plant.Spec.HistorianURL)
 	keys := evaluate.RequiredSignals(cf.Spec, policy.Spec)
-	agg, err := r.historian(plant.Spec.HistorianURL).Aggregate(ctx, keys, window)
+	agg, err := hist.Aggregate(ctx, keys, window)
 	if err != nil {
 		return requeue, r.pending(ctx, &plant, "HistorianUnreachable", err.Error())
 	}
@@ -142,11 +137,13 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		setCondition(&plant, v1alpha1.ConditionPolicyCompliant, true, "PolicyCompliant", msg)
 	}
 
+	evaluateLoops(ctx, &plant, policy.Spec, hist, policyChanged)
+
 	if err := r.Status().Update(ctx, &plant); err != nil {
 		return ctrl.Result{}, err
 	}
 	log.Info("plant evaluated", "policy", policy.Name, "cost", result.Cost, "phase", status.Phase,
-		"violations", status.ConsecutiveViolations)
+		"violations", status.ConsecutiveViolations, "loopViolations", status.ConsecutiveLoopViolations)
 	return requeue, nil
 }
 
@@ -168,14 +165,88 @@ func (r *PlantReconciler) pending(ctx context.Context, plant *v1alpha1.Plant, re
 			ObservedGeneration: plant.Generation,
 		})
 	}
+	if meta.FindStatusCondition(plant.Status.Conditions, v1alpha1.ConditionControlLoopsHealthy) != nil {
+		setUnknown(plant, v1alpha1.ConditionControlLoopsHealthy, reason, "no evaluation")
+	}
 	return r.Status().Update(ctx, plant)
 }
 
-func (r *PlantReconciler) historian(url string) Historian {
-	if r.NewHistorian != nil {
-		return r.NewHistorian(url)
+// evaluateLoops is the second observation level: control-loop quality (Bradu et al. 2017). It only
+// writes Status.Loops, ConsecutiveLoopViolations and the ControlLoopsHealthy condition — never the
+// phase — and a historian failure here leaves the condition Unknown without touching the economic
+// verdict.
+func evaluateLoops(ctx context.Context, plant *v1alpha1.Plant, spec v1alpha1.OperatingPolicySpec, hist *historian.Client, policyChanged bool) {
+	status := &plant.Status
+	if len(spec.ControlLoops) == 0 {
+		status.Loops = nil
+		status.ConsecutiveLoopViolations = 0
+		meta.RemoveStatusCondition(&status.Conditions, v1alpha1.ConditionControlLoopsHealthy)
+		return
 	}
-	return historian.New(url)
+
+	window := secondsOr(spec.LoopWindowSeconds, 300)
+	sampleInterval := secondsOr(spec.LoopSampleIntervalSeconds, 1)
+	resp, err := hist.LoopPerformance(ctx, evaluate.LoopSpecs(spec.ControlLoops), window, sampleInterval)
+	if err != nil {
+		setUnknown(plant, v1alpha1.ConditionControlLoopsHealthy, "HistorianUnreachable", err.Error())
+		return
+	}
+
+	res := evaluate.EvaluateLoops(spec.ControlLoops, resp.Loops)
+	status.Loops = res.Loops
+	if res.Evaluated == 0 {
+		// No loop passed the variability gate or had an index: there is no verdict, and the run of
+		// consecutive violations is interrupted.
+		status.ConsecutiveLoopViolations = 0
+		setUnknown(plant, v1alpha1.ConditionControlLoopsHealthy, "NoLoopEvaluated", notEvaluatedLoops(res.Loops))
+		return
+	}
+
+	status.ConsecutiveLoopViolations = evaluate.NextViolations(status.ConsecutiveLoopViolations, res.Violated, policyChanged)
+	if evaluate.NonCompliant(status.ConsecutiveLoopViolations, spec.LoopPersistenceEvaluations) {
+		setCondition(plant, v1alpha1.ConditionControlLoopsHealthy, false, "LoopsDegraded",
+			fmt.Sprintf("%s for %d consecutive evaluations (persistence %d)", unhealthyLoops(res.Loops),
+				status.ConsecutiveLoopViolations, spec.LoopPersistenceEvaluations))
+		return
+	}
+	msg := fmt.Sprintf("%d of %d loop(s) evaluated, all above threshold", res.Evaluated, len(res.Loops))
+	if status.ConsecutiveLoopViolations > 0 {
+		msg = fmt.Sprintf("%s for %d evaluation(s), below persistence %d", unhealthyLoops(res.Loops),
+			status.ConsecutiveLoopViolations, spec.LoopPersistenceEvaluations)
+	}
+	setCondition(plant, v1alpha1.ConditionControlLoopsHealthy, true, "LoopsHealthy", msg)
+}
+
+func secondsOr(seconds int32, fallback int32) time.Duration {
+	if seconds <= 0 {
+		seconds = fallback
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func unhealthyLoops(loops []v1alpha1.LoopStatus) string {
+	var names []string
+	for _, l := range loops {
+		if !l.Healthy {
+			names = append(names, fmt.Sprintf("%s PI=%s", l.Name, observed(l.Predictability)))
+		}
+	}
+	return "below threshold: " + strings.Join(names, "; ")
+}
+
+func notEvaluatedLoops(loops []v1alpha1.LoopStatus) string {
+	var parts []string
+	for _, l := range loops {
+		parts = append(parts, fmt.Sprintf("%s (%s)", l.Name, l.Reason))
+	}
+	return "no loop could be judged: " + strings.Join(parts, "; ")
+}
+
+func setUnknown(plant *v1alpha1.Plant, condType, reason, message string) {
+	meta.SetStatusCondition(&plant.Status.Conditions, metav1.Condition{
+		Type: condType, Status: metav1.ConditionUnknown, Reason: reason, Message: message,
+		ObservedGeneration: plant.Generation,
+	})
 }
 
 func setCondition(plant *v1alpha1.Plant, condType string, ok bool, reason, message string) {

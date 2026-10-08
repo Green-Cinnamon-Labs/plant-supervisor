@@ -27,6 +27,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.conditions[?(@.type=="ControlLoopsHealthy")].status
+      name: Loops
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -141,6 +144,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              consecutiveLoopViolations:
+                description: ConsecutiveLoopViolations counts consecutive evaluations
+                  with at least one unhealthy loop.
+                format: int32
+                type: integer
               consecutiveViolations:
                 description: ConsecutiveViolations counts consecutive failing evaluations
                   under ActivePolicy.
@@ -179,6 +187,45 @@ spec:
               lastEvaluationTime:
                 format: date-time
                 type: string
+              loops:
+                description: Loops is the per-loop result of the second observation
+                  level.
+                items:
+                  description: LoopStatus is the quality of one control loop in the
+                    last evaluation.
+                  properties:
+                    evaluated:
+                      description: |-
+                        Evaluated is false when the loop could not be judged: no index (e.g. too few samples) or
+                        controller output below the variability gate.
+                      type: boolean
+                    healthy:
+                      description: Healthy is false only for an evaluated loop with
+                        Predictability below its threshold.
+                      type: boolean
+                    name:
+                      type: string
+                    offset:
+                      description: Offset is the mean loop error SP − PV (a proportional
+                        controller keeps one).
+                      type: number
+                    outputStd:
+                      description: OutputStd is the standard deviation of the controller
+                        output over the window.
+                      type: number
+                    predictability:
+                      description: Predictability is the Predictability Index PI (0–1)
+                        of the loop error's fluctuation.
+                      type: number
+                    reason:
+                      description: Reason explains Evaluated=false or Healthy=false.
+                      type: string
+                  required:
+                  - evaluated
+                  - healthy
+                  - name
+                  type: object
+                type: array
               phase:
                 description: PlantPhase summarizes the verdict.
                 enum:

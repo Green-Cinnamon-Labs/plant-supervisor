@@ -58,6 +58,29 @@ spec:
 
 `persistenceEvaluations` vem do CLPM (Bradu et al. 2018): um transiente curto nao deve virar veredito. As avaliacoes sao janelas deslizantes (uma a cada `evaluationIntervalSeconds` do Plant, cada uma olhando os ultimos `windowSeconds`), por isso o nome conta avaliacoes e nao janelas.
 
+### Malhas de controle (segundo nivel de observacao)
+
+A politica tambem pode declarar as malhas de controle cuja **qualidade** deve ser acompanhada. O indice e o Predictability Index de Bradu et al. (2017): quanto do erro `SP − PV` um modelo autorregressivo consegue prever. O historian calcula; o supervisor julga. Esse julgamento e um **veredito separado** (condition `ControlLoopsHealthy`), que nunca muda a `phase` nem o `PolicyCompliant`.
+
+```yaml
+spec:
+  loopWindowSeconds: 300            # janela t_W do indice
+  loopSampleIntervalSeconds: 1      # amostragem t_s (o historian reamostra a serie)
+  loopPersistenceEvaluations: 3     # N de Bradu: avaliacoes seguidas com malha ruim ate o veredito virar
+  controlLoops:
+    - name: separator_level
+      pv: xmeas.separator.level
+      setpoint: 50                  # o SP do controlador (no TEP e uma constante no codigo da planta)
+      op: valve.separator_underflow.position
+      timeConstantSeconds: 30       # T da malha em malha fechada → horizonte b = ceil(T / t_s)
+      minPredictability: 0.4        # PI_L: abaixo disso a malha e considerada mal sintonizada
+      minOutputStd: 0.1             # portao σ̄_y: so julga se a saida do controlador variar mais que isso
+```
+
+As duas regras de Bradu, nessa ordem: (1) a malha so e julgada se a saida do controlador variar mais que `minOutputStd` — uma malha saturada, parada ou em manual nao diz nada sobre sintonia; (2) uma malha julgada e considerada ruim se o PI ficar abaixo de `minPredictability`. Se nenhuma malha puder ser julgada (portao ou falta de indice), a condition fica `Unknown` com motivo `NoLoopEvaluated`.
+
+O PI e calculado sobre a **flutuacao do erro em torno da media**, nao sobre o erro bruto: as malhas do TEP sao proporcionais e deixam um offset constante, que sobre o erro bruto empurraria o PI para 1. O offset aparece a parte no status (spec #87).
+
 ## Plant
 
 O que o usuario declara e minimo:
@@ -80,19 +103,23 @@ status:
   targets: [{signal: ..., target: 22.949, observed: 22.64, met: true}, ...]
   constraints: [{signal: ..., observed: 2695.1, satisfied: true}, ...]
   consecutiveViolations: 0
+  loops:                             # so quando a politica declara controlLoops
+    - {name: separator_level, predictability: 0.26, offset: 0.07, outputStd: 0.32, evaluated: true, healthy: true}
+  consecutiveLoopViolations: 0
   lastEvaluationTime: "..."
   conditions:
     - type: DataAvailable          # historian alcancavel, planta conectada, todos os sinais com amostra
     - type: CostWithinBudget       # J <= maxCost
     - type: TargetsMet
     - type: ConstraintsSatisfied
-    - type: PolicyCompliant        # o veredito, ja filtrado pela persistencia
+    - type: PolicyCompliant        # o veredito economico, ja filtrado pela persistencia
+    - type: ControlLoopsHealthy    # segundo nivel: qualidade das malhas (separado da phase)
 ```
 
 ```
 $ kubectl get plants
-NAME   POLICY      COST      UNIT   PHASE       AGE
-tep    tep-mode1   166.39    $/h    Compliant   5m
+NAME   POLICY      COST      UNIT   PHASE       LOOPS   AGE
+tep    tep-mode1   166.39    $/h    Compliant   True    5m
 ```
 
 ### Fases

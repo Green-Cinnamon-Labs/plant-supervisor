@@ -34,12 +34,20 @@ Reconcile(Plant) chamado
   |     +- politica mudou desde a ultima avaliacao: contador recomeca
   |     +- NonCompliant se consecutiveViolations >= persistenceEvaluations
   |
-  +- 7. Grava status (phase, cost, terms, targets, constraints, conditions)
+  +- 7. Malhas de controle (so se a politica declara controlLoops)
+  |     +- pede ao historian: POST /loop-performance {loops, window_s, sample_interval_s}
+  |     |     -> erro: ControlLoopsHealthy = Unknown (HistorianUnreachable), o veredito economico fica
+  |     +- evaluate.EvaluateLoops: portao σ_OP > minOutputStd, depois PI >= minPredictability
+  |     +- nenhuma malha julgada: Unknown (NoLoopEvaluated), contador de malhas zera
+  |     +- persistencia propria: consecutiveLoopViolations, loopPersistenceEvaluations
+  |     +- ControlLoopsHealthy True/False — nunca muda a phase
   |
-  +- 8. RequeueAfter(evaluationIntervalSeconds)
+  +- 8. Grava status (phase, cost, terms, targets, constraints, loops, conditions)
+  |
+  +- 9. RequeueAfter(evaluationIntervalSeconds)
 ```
 
-O passo 5 e o passo 6 sao funcoes puras em `internal/evaluate` — o resto e encanamento.
+Os passos 5, 6 e o julgamento do passo 7 sao funcoes puras em `internal/evaluate` — o resto e encanamento. Os dois niveis de observacao (economico e qualidade das malhas) correm na mesma avaliacao, mas nao se misturam: um nao muda o veredito do outro.
 
 ## Quando o reconcile roda
 

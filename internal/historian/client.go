@@ -14,7 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package historian is an HTTP client for tep-historian's POST /aggregate endpoint.
+// Package historian is an HTTP client for tep-historian's POST /aggregate and
+// POST /loop-performance endpoints.
 package historian
 
 import (
@@ -76,28 +77,80 @@ type aggregateRequest struct {
 
 // Aggregate asks for window statistics of keys.
 func (c *Client) Aggregate(ctx context.Context, keys []string, window time.Duration) (*AggregateResponse, error) {
-	body, err := json.Marshal(aggregateRequest{Keys: keys, WindowS: window.Seconds()})
-	if err != nil {
+	var out AggregateResponse
+	if err := c.post(ctx, "/aggregate", aggregateRequest{Keys: keys, WindowS: window.Seconds()}, &out); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/aggregate", bytes.NewReader(body))
-	if err != nil {
+	return &out, nil
+}
+
+// LoopSpec is one loop sent to POST /loop-performance.
+type LoopSpec struct {
+	Name          string  `json:"name"`
+	PV            string  `json:"pv"`
+	SP            float64 `json:"sp"`
+	OP            string  `json:"op"`
+	TimeConstantS float64 `json:"time_constant_s"`
+}
+
+// LoopPerformance mirrors one entry of the historian's "loops" map. PI is nil (with a Reason)
+// when the index could not be computed.
+type LoopPerformance struct {
+	PI       *float64 `json:"pi"`
+	Offset   *float64 `json:"offset"`
+	PIRaw    *float64 `json:"pi_raw"`
+	SigmaOP  *float64 `json:"sigma_op"`
+	Reason   *string  `json:"reason"`
+	Samples  int      `json:"n"`
+	Horizon  int      `json:"b"`
+	ARModelM int      `json:"m"`
+}
+
+// LoopPerformanceResponse mirrors the historian's /loop-performance response.
+type LoopPerformanceResponse struct {
+	Connected bool                       `json:"connected"`
+	Loops     map[string]LoopPerformance `json:"loops"`
+}
+
+type loopPerformanceRequest struct {
+	Loops           []LoopSpec `json:"loops"`
+	WindowS         float64    `json:"window_s"`
+	SampleIntervalS float64    `json:"sample_interval_s"`
+}
+
+// LoopPerformance asks for the Predictability Index of each loop over the window, with the
+// series resampled to sampleInterval.
+func (c *Client) LoopPerformance(ctx context.Context, loops []LoopSpec, window, sampleInterval time.Duration) (*LoopPerformanceResponse, error) {
+	var out LoopPerformanceResponse
+	req := loopPerformanceRequest{Loops: loops, WindowS: window.Seconds(), SampleIntervalS: sampleInterval.Seconds()}
+	if err := c.post(ctx, "/loop-performance", req, &out); err != nil {
 		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) post(ctx context.Context, path string, in, out any) error {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("historian returned %s", resp.Status)
+		return fmt.Errorf("historian %s returned %s", path, resp.Status)
 	}
-	var out AggregateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decoding historian response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("decoding historian %s response: %w", path, err)
 	}
-	return &out, nil
+	return nil
 }

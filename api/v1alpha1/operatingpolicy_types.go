@@ -44,6 +44,42 @@ type SignalConstraint struct {
 	Max *float64 `json:"max,omitempty"`
 }
 
+// ControlLoop declares one control loop whose quality is monitored with the Predictability Index
+// of Bradu et al. (2017): how much of the loop error SP − PV an autoregressive model can predict.
+// The historian computes the index; the supervisor judges it against the thresholds below.
+type ControlLoop struct {
+	// Name identifies the loop in status (e.g. "reactor_pressure").
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// PV is the historian key of the measured variable.
+	// +kubebuilder:validation:MinLength=1
+	PV string `json:"pv"`
+
+	// Setpoint of the loop, in the PV's unit.
+	Setpoint float64 `json:"setpoint"`
+
+	// OP is the historian key of the controller output (e.g. the valve position).
+	// +kubebuilder:validation:MinLength=1
+	OP string `json:"op"`
+
+	// TimeConstantSeconds is the closed-loop settling time T; it sets the prediction horizon
+	// b = ceil(T / t_s).
+	// +kubebuilder:validation:Minimum=1
+	TimeConstantSeconds int32 `json:"timeConstantSeconds"`
+
+	// MinPredictability is the threshold PI_L: below it the loop is considered poorly tuned.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	MinPredictability float64 `json:"minPredictability"`
+
+	// MinOutputStd is the variability gate σ̄_y: the loop is only judged when the standard
+	// deviation of its controller output is above it (a saturated, idle or manual loop is not).
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MinOutputStd float64 `json:"minOutputStd,omitempty"`
+}
+
 // OperatingPolicySpec is one way of operating the plant: what J must not exceed, which signals
 // must hit which targets, and which limits must hold.
 type OperatingPolicySpec struct {
@@ -82,6 +118,32 @@ type OperatingPolicySpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	PersistenceEvaluations int32 `json:"persistenceEvaluations,omitempty"`
+
+	// ControlLoops are judged separately from the economic verdict (condition ControlLoopsHealthy,
+	// never PolicyCompliant): the two observation levels stay side by side.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ControlLoops []ControlLoop `json:"controlLoops,omitempty"`
+
+	// LoopWindowSeconds is the time window t_W over which each loop's index is computed.
+	// +kubebuilder:default=300
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	LoopWindowSeconds int32 `json:"loopWindowSeconds,omitempty"`
+
+	// LoopSampleIntervalSeconds is the sampling time t_s the historian resamples the series to.
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	LoopSampleIntervalSeconds int32 `json:"loopSampleIntervalSeconds,omitempty"`
+
+	// LoopPersistenceEvaluations is how many consecutive evaluations with an unhealthy loop are
+	// needed before ControlLoopsHealthy turns False (Bradu's N).
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	LoopPersistenceEvaluations int32 `json:"loopPersistenceEvaluations,omitempty"`
 }
 
 // +kubebuilder:object:root=true
