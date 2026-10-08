@@ -17,9 +17,10 @@ limitations under the License.
 package controller
 
 import (
-	"context"
-	"errors"
-	"time"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,38 +30,66 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
-	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/historian"
 )
 
-// fakeHistorian returns fixed means, or an error.
+// fakeHistorian is a real HTTP server speaking tep-historian's API, so the controller tests also
+// exercise the real historian client (request encoding, response decoding, error handling).
 type fakeHistorian struct {
+	mu        sync.Mutex
 	means     map[string]float64
 	connected bool
-	err       error
+	loops     map[string]map[string]any // historian "loops" entries, by loop name
+	fail      bool                      // answer 500 to every request
+	failLoops bool                      // answer 500 to /loop-performance only
 }
 
-func (f *fakeHistorian) Aggregate(_ context.Context, keys []string, _ time.Duration) (*historian.AggregateResponse, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeHistorian) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail || (f.failLoops && r.URL.Path == "/loop-performance") {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	resp := &historian.AggregateResponse{Connected: f.connected, Signals: map[string]historian.SignalStats{}}
-	for _, k := range keys {
-		if v, ok := f.means[k]; ok {
-			v := v
-			resp.Signals[k] = historian.SignalStats{Count: 10, Mean: &v}
-		} else {
-			resp.Missing = append(resp.Missing, k)
+	switch r.URL.Path {
+	case "/aggregate":
+		var req struct {
+			Keys []string `json:"keys"`
 		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		signals := map[string]any{}
+		var missing []string
+		for _, k := range req.Keys {
+			if v, ok := f.means[k]; ok {
+				signals[k] = map[string]any{"count": 10, "mean": v}
+			} else {
+				missing = append(missing, k)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"connected": f.connected, "signals": signals, "missing": missing})
+	case "/loop-performance":
+		_ = json.NewEncoder(w).Encode(map[string]any{"connected": f.connected, "loops": f.loops})
+	default:
+		w.WriteHeader(http.StatusNotFound)
 	}
-	return resp, nil
+}
+
+func (f *fakeHistorian) set(fn func(*fakeHistorian)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(f)
 }
 
 func fp(v float64) *float64 { return &v }
+
+func loopPerf(pi, sigmaOP float64) map[string]any {
+	return map[string]any{"pi": pi, "sigma_op": sigmaOP, "offset": 0.0, "n": 300, "b": 30, "m": 60}
+}
 
 var _ = Describe("Plant Controller", func() {
 	const ns = "default"
 	var (
 		hist       *fakeHistorian
+		server     *httptest.Server
 		reconciler *PlantReconciler
 		key        = types.NamespacedName{Namespace: ns, Name: "plant-under-test"}
 	)
@@ -77,14 +106,29 @@ var _ = Describe("Plant Controller", func() {
 		Expect(c).NotTo(BeNil(), "condition %s", t)
 		return c.Status
 	}
+	conditionReason := func(p v1alpha1.Plant, t string) string {
+		c := meta.FindStatusCondition(p.Status.Conditions, t)
+		Expect(c).NotTo(BeNil(), "condition %s", t)
+		return c.Reason
+	}
+	withLoops := func() {
+		var policy v1alpha1.OperatingPolicy
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "policy"}, &policy)).To(Succeed())
+		policy.Spec.ControlLoops = []v1alpha1.ControlLoop{
+			{Name: "level", PV: "level", Setpoint: 50, OP: "valve", TimeConstantSeconds: 30, MinPredictability: 0.4, MinOutputStd: 0.1},
+		}
+		policy.Spec.LoopPersistenceEvaluations = 2
+		Expect(k8sClient.Update(ctx, &policy)).To(Succeed())
+	}
 
 	BeforeEach(func() {
-		hist = &fakeHistorian{connected: true, means: map[string]float64{"power": 100, "level": 50, "pressure": 200}}
-		reconciler = &PlantReconciler{
-			Client:       k8sClient,
-			Scheme:       k8sClient.Scheme(),
-			NewHistorian: func(string) Historian { return hist },
+		hist = &fakeHistorian{
+			connected: true,
+			means:     map[string]float64{"power": 100, "level": 50, "pressure": 200},
+			loops:     map[string]map[string]any{"level": loopPerf(0.7, 0.5)},
 		}
+		server = httptest.NewServer(hist)
+		reconciler = &PlantReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 
 		Expect(k8sClient.Create(ctx, &v1alpha1.CostFunction{
 			ObjectMeta: metav1.ObjectMeta{Name: "cf", Namespace: ns},
@@ -104,80 +148,131 @@ var _ = Describe("Plant Controller", func() {
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &v1alpha1.Plant{
 			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: ns},
-			Spec:       v1alpha1.PlantSpec{HistorianURL: "http://unused", PolicyRef: "policy"},
+			Spec:       v1alpha1.PlantSpec{HistorianURL: server.URL, PolicyRef: "policy"},
 		})).To(Succeed())
 	})
 
 	AfterEach(func() {
+		server.Close()
 		Expect(k8sClient.Delete(ctx, &v1alpha1.Plant{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: ns}})).To(Succeed())
 		Expect(k8sClient.Delete(ctx, &v1alpha1.OperatingPolicy{ObjectMeta: metav1.ObjectMeta{Name: "policy", Namespace: ns}})).To(Succeed())
 		Expect(k8sClient.Delete(ctx, &v1alpha1.CostFunction{ObjectMeta: metav1.ObjectMeta{Name: "cf", Namespace: ns}})).To(Succeed())
 	})
 
-	It("reports J and a compliant verdict when every check passes", func() {
-		p := reconcileOnce()
+	Context("economic level", func() {
+		It("reports J and a compliant verdict when every check passes", func() {
+			p := reconcileOnce()
 
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant))
-		Expect(p.Status.ActivePolicy).To(Equal("policy"))
-		Expect(p.Status.Cost.Value).To(BeNumerically("~", 10.0, 1e-9))
-		Expect(p.Status.Terms).To(HaveLen(1))
-		Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionTrue))
-		Expect(condition(p, v1alpha1.ConditionDataAvailable)).To(Equal(metav1.ConditionTrue))
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant))
+			Expect(p.Status.ActivePolicy).To(Equal("policy"))
+			Expect(p.Status.Cost.Value).To(BeNumerically("~", 10.0, 1e-9))
+			Expect(p.Status.Terms).To(HaveLen(1))
+			Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionTrue))
+			Expect(condition(p, v1alpha1.ConditionDataAvailable)).To(Equal(metav1.ConditionTrue))
+			Expect(meta.FindStatusCondition(p.Status.Conditions, v1alpha1.ConditionControlLoopsHealthy)).To(BeNil(),
+				"no loops declared → no loop condition")
+		})
+
+		It("flips to NonCompliant only after the persistence count", func() {
+			hist.set(func(h *fakeHistorian) { h.means["pressure"] = 300 }) // violates max 250
+
+			p := reconcileOnce()
+			Expect(condition(p, v1alpha1.ConditionConstraintsSatisfied)).To(Equal(metav1.ConditionFalse))
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant), "1 violation < persistence 2")
+			Expect(p.Status.ConsecutiveViolations).To(Equal(int32(1)))
+
+			p = reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseNonCompliant))
+			Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionFalse))
+
+			hist.set(func(h *fakeHistorian) { h.means["pressure"] = 200 })
+			p = reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant))
+			Expect(p.Status.ConsecutiveViolations).To(BeZero())
+		})
+
+		It("flags cost over budget", func() {
+			hist.set(func(h *fakeHistorian) { h.means["power"] = 200 }) // J = 20 > 15
+
+			p := reconcileOnce()
+			Expect(condition(p, v1alpha1.ConditionCostWithinBudget)).To(Equal(metav1.ConditionFalse))
+		})
+
+		It("stays Pending when the historian is unreachable", func() {
+			hist.set(func(h *fakeHistorian) { h.fail = true })
+
+			p := reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
+			Expect(condition(p, v1alpha1.ConditionDataAvailable)).To(Equal(metav1.ConditionFalse))
+			Expect(conditionReason(p, v1alpha1.ConditionDataAvailable)).To(Equal("HistorianUnreachable"))
+			Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionUnknown))
+		})
+
+		It("stays Pending when a required signal has no samples", func() {
+			hist.set(func(h *fakeHistorian) { delete(h.means, "level") })
+
+			p := reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
+			c := meta.FindStatusCondition(p.Status.Conditions, v1alpha1.ConditionDataAvailable)
+			Expect(c.Reason).To(Equal("MissingSignals"))
+			Expect(c.Message).To(ContainSubstring("level"))
+		})
+
+		It("stays Pending when the policy does not exist", func() {
+			var p v1alpha1.Plant
+			Expect(k8sClient.Get(ctx, key, &p)).To(Succeed())
+			p.Spec.PolicyRef = "nope"
+			Expect(k8sClient.Update(ctx, &p)).To(Succeed())
+
+			p = reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
+			Expect(conditionReason(p, v1alpha1.ConditionDataAvailable)).To(Equal("PolicyNotFound"))
+		})
 	})
 
-	It("flips to NonCompliant only after the persistence count", func() {
-		hist.means["pressure"] = 300 // violates max 250
+	Context("control-loop level", func() {
+		BeforeEach(withLoops)
 
-		p := reconcileOnce()
-		Expect(condition(p, v1alpha1.ConditionConstraintsSatisfied)).To(Equal(metav1.ConditionFalse))
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant), "1 violation < persistence 2")
-		Expect(p.Status.ConsecutiveViolations).To(Equal(int32(1)))
+		It("reports each loop and a healthy condition", func() {
+			p := reconcileOnce()
 
-		p = reconcileOnce()
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseNonCompliant))
-		Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionFalse))
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionTrue))
+			Expect(p.Status.Loops).To(HaveLen(1))
+			Expect(*p.Status.Loops[0].Predictability).To(BeNumerically("~", 0.7, 1e-9))
+			Expect(p.Status.Loops[0].Evaluated).To(BeTrue())
+		})
 
-		hist.means["pressure"] = 200
-		p = reconcileOnce()
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant))
-		Expect(p.Status.ConsecutiveViolations).To(BeZero())
-	})
+		It("turns ControlLoopsHealthy False after the loop persistence, without touching the phase", func() {
+			hist.set(func(h *fakeHistorian) { h.loops["level"] = loopPerf(0.1, 0.5) })
 
-	It("flags cost over budget", func() {
-		hist.means["power"] = 200 // J = 20 > 15
+			p := reconcileOnce()
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionTrue), "1 < persistence 2")
+			Expect(p.Status.ConsecutiveLoopViolations).To(Equal(int32(1)))
 
-		p := reconcileOnce()
-		Expect(condition(p, v1alpha1.ConditionCostWithinBudget)).To(Equal(metav1.ConditionFalse))
-	})
+			p = reconcileOnce()
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionFalse))
+			Expect(conditionReason(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal("LoopsDegraded"))
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant), "the two observation levels stay separate")
+			Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionTrue))
+		})
 
-	It("stays Pending when the historian is unreachable", func() {
-		hist.err = errors.New("connection refused")
+		It("does not judge a loop whose output is below the variability gate", func() {
+			hist.set(func(h *fakeHistorian) { h.loops["level"] = loopPerf(0.05, 0.01) })
 
-		p := reconcileOnce()
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
-		Expect(condition(p, v1alpha1.ConditionDataAvailable)).To(Equal(metav1.ConditionFalse))
-		Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionUnknown))
-	})
+			p := reconcileOnce()
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionUnknown))
+			Expect(conditionReason(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal("NoLoopEvaluated"))
+			Expect(p.Status.Loops[0].Reason).To(Equal("OutputBelowGate"))
+		})
 
-	It("stays Pending when a required signal has no samples", func() {
-		delete(hist.means, "level")
+		It("keeps the economic verdict when only the loop endpoint fails", func() {
+			hist.set(func(h *fakeHistorian) { h.failLoops = true })
 
-		p := reconcileOnce()
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
-		c := meta.FindStatusCondition(p.Status.Conditions, v1alpha1.ConditionDataAvailable)
-		Expect(c.Reason).To(Equal("MissingSignals"))
-		Expect(c.Message).To(ContainSubstring("level"))
-	})
-
-	It("stays Pending when the policy does not exist", func() {
-		var p v1alpha1.Plant
-		Expect(k8sClient.Get(ctx, key, &p)).To(Succeed())
-		p.Spec.PolicyRef = "nope"
-		Expect(k8sClient.Update(ctx, &p)).To(Succeed())
-
-		p = reconcileOnce()
-		Expect(p.Status.Phase).To(Equal(v1alpha1.PhasePending))
-		c := meta.FindStatusCondition(p.Status.Conditions, v1alpha1.ConditionDataAvailable)
-		Expect(c.Reason).To(Equal("PolicyNotFound"))
+			p := reconcileOnce()
+			Expect(p.Status.Phase).To(Equal(v1alpha1.PhaseCompliant))
+			Expect(condition(p, v1alpha1.ConditionPolicyCompliant)).To(Equal(metav1.ConditionTrue))
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionUnknown))
+			Expect(conditionReason(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal("HistorianUnreachable"))
+		})
 	})
 })

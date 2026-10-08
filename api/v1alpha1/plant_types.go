@@ -59,6 +59,9 @@ const (
 	ConditionTargetsMet           = "TargetsMet"
 	ConditionConstraintsSatisfied = "ConstraintsSatisfied"
 	ConditionPolicyCompliant      = "PolicyCompliant"
+	// ConditionControlLoopsHealthy is the second observation level: control-loop quality. It is
+	// set only when the active policy declares control loops, and never affects Phase.
+	ConditionControlLoopsHealthy = "ControlLoopsHealthy"
 )
 
 // CostStatus is the evaluated value of J.
@@ -103,6 +106,34 @@ type ConstraintResult struct {
 	Satisfied bool `json:"satisfied"`
 }
 
+// LoopStatus is the quality of one control loop in the last evaluation.
+type LoopStatus struct {
+	Name string `json:"name"`
+
+	// Predictability is the Predictability Index PI (0–1) of the loop error's fluctuation.
+	// +optional
+	Predictability *float64 `json:"predictability,omitempty"`
+
+	// Offset is the mean loop error SP − PV (a proportional controller keeps one).
+	// +optional
+	Offset *float64 `json:"offset,omitempty"`
+
+	// OutputStd is the standard deviation of the controller output over the window.
+	// +optional
+	OutputStd *float64 `json:"outputStd,omitempty"`
+
+	// Evaluated is false when the loop could not be judged: no index (e.g. too few samples) or
+	// controller output below the variability gate.
+	Evaluated bool `json:"evaluated"`
+
+	// Healthy is false only for an evaluated loop with Predictability below its threshold.
+	Healthy bool `json:"healthy"`
+
+	// Reason explains Evaluated=false or Healthy=false.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+}
+
 // PlantStatus is the supervisory layer's verdict about the plant.
 type PlantStatus struct {
 	// +optional
@@ -128,6 +159,14 @@ type PlantStatus struct {
 	// +optional
 	ConsecutiveViolations int32 `json:"consecutiveViolations,omitempty"`
 
+	// Loops is the per-loop result of the second observation level.
+	// +optional
+	Loops []LoopStatus `json:"loops,omitempty"`
+
+	// ConsecutiveLoopViolations counts consecutive evaluations with at least one unhealthy loop.
+	// +optional
+	ConsecutiveLoopViolations int32 `json:"consecutiveLoopViolations,omitempty"`
+
 	// +optional
 	LastEvaluationTime *metav1.Time `json:"lastEvaluationTime,omitempty"`
 
@@ -143,6 +182,7 @@ type PlantStatus struct {
 // +kubebuilder:printcolumn:name="Cost",type=number,JSONPath=`.status.cost.value`
 // +kubebuilder:printcolumn:name="Unit",type=string,JSONPath=`.status.cost.unit`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Loops",type=string,JSONPath=`.status.conditions[?(@.type=="ControlLoopsHealthy")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Plant is an industrial plant observed by the supervisory layer.
