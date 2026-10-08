@@ -17,6 +17,9 @@ limitations under the License.
 package evaluate
 
 import (
+	"math"
+	"strings"
+
 	"github.com/Green-Cinnamon-Labs/plant-supervisor/api/v1alpha1"
 	"github.com/Green-Cinnamon-Labs/plant-supervisor/internal/historian"
 )
@@ -32,13 +35,20 @@ type LoopsResult struct {
 	Violated bool
 }
 
-// EvaluateLoops judges each declared loop with the two rules of Bradu et al. (2017):
+// EvaluateLoops judges each declared loop with two independent tests:
+//
+// Tuning — the two rules of Bradu et al. (2017):
 //  1. the loop is only judged if its controller output varies more than MinOutputStd (a saturated,
 //     idle or manual loop says nothing about tuning);
 //  2. a judged loop is unhealthy when its Predictability Index is below MinPredictability.
 //
-// A loop the historian could not compute (no index) is reported as not evaluated, never as
-// unhealthy.
+// Tracking — the deviation alarm the index assumes exists elsewhere: when MaxOffset is set, the
+// loop is unhealthy if |offset| exceeds it, whatever the gate says (a loop that lost its setpoint
+// can be quiet or saturated). Experiment 25 showed why: under a disturbance the error drifts
+// smoothly, the index goes to ~1 and calls the loop healthy while it is far from the setpoint.
+//
+// A loop is unhealthy if it fails either test. A loop with neither test applicable (no index,
+// below the gate, no MaxOffset) is reported as not evaluated, never as unhealthy.
 func EvaluateLoops(loops []v1alpha1.ControlLoop, perf map[string]historian.LoopPerformance) LoopsResult {
 	var r LoopsResult
 	for _, loop := range loops {
@@ -51,22 +61,42 @@ func EvaluateLoops(loops []v1alpha1.ControlLoop, perf map[string]historian.LoopP
 		}
 		st.Predictability, st.Offset, st.OutputStd = p.PI, p.Offset, p.SigmaOP
 
+		var failures, skipped []string
+
+		// Tuning test (Bradu)
 		switch {
 		case p.PI == nil:
-			st.Reason = "NoIndex"
+			skip := "NoIndex"
 			if p.Reason != nil {
-				st.Reason = "NoIndex: " + *p.Reason
+				skip = "NoIndex: " + *p.Reason
 			}
+			skipped = append(skipped, skip)
 		case p.SigmaOP == nil || *p.SigmaOP <= loop.MinOutputStd:
-			st.Reason = "OutputBelowGate"
+			skipped = append(skipped, "OutputBelowGate")
 		default:
 			st.Evaluated = true
-			r.Evaluated++
 			if *p.PI < loop.MinPredictability {
-				st.Healthy = false
-				st.Reason = "BelowThreshold"
-				r.Violated = true
+				failures = append(failures, "BelowThreshold")
 			}
+		}
+
+		// Tracking test (deviation alarm)
+		if loop.MaxOffset != nil && p.Offset != nil {
+			st.Evaluated = true
+			if math.Abs(*p.Offset) > *loop.MaxOffset {
+				failures = append(failures, "OffsetExceeded")
+			}
+		}
+
+		if st.Evaluated {
+			r.Evaluated++
+		}
+		if len(failures) > 0 {
+			st.Healthy = false
+			st.Reason = strings.Join(failures, ", ")
+			r.Violated = true
+		} else if !st.Evaluated {
+			st.Reason = strings.Join(skipped, ", ")
 		}
 		r.Loops = append(r.Loops, st)
 	}

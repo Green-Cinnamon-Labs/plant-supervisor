@@ -265,6 +265,23 @@ var _ = Describe("Plant Controller", func() {
 			Expect(p.Status.Loops[0].Reason).To(Equal("OutputBelowGate"))
 		})
 
+		It("turns ControlLoopsHealthy False when a predictable loop drifts away from its setpoint", func() {
+			// Experiment 25: PI ~1 (predictable drift) but far from the setpoint.
+			var policy v1alpha1.OperatingPolicy
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "policy"}, &policy)).To(Succeed())
+			policy.Spec.ControlLoops[0].MaxOffset = fp(1.0)
+			Expect(k8sClient.Update(ctx, &policy)).To(Succeed())
+			hist.set(func(h *fakeHistorian) {
+				h.loops["level"] = map[string]any{"pi": 0.99, "sigma_op": 0.8, "offset": 3.5, "n": 300, "b": 30, "m": 60}
+			})
+
+			reconcileOnce()
+			p := reconcileOnce() // persistence 2
+			Expect(condition(p, v1alpha1.ConditionControlLoopsHealthy)).To(Equal(metav1.ConditionFalse))
+			Expect(p.Status.Loops[0].Reason).To(Equal("OffsetExceeded"))
+			Expect(meta.FindStatusCondition(p.Status.Conditions, v1alpha1.ConditionControlLoopsHealthy).Message).To(ContainSubstring("offset=3.5"))
+		})
+
 		It("keeps the economic verdict when only the loop endpoint fails", func() {
 			hist.set(func(h *fakeHistorian) { h.failLoops = true })
 

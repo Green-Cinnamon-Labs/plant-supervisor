@@ -78,6 +78,15 @@ type ControlLoop struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MinOutputStd float64 `json:"minOutputStd,omitempty"`
+
+	// MaxOffset is the setpoint-tracking limit: the loop is unhealthy when the mean error
+	// |SP − mean(PV)| over the window exceeds it, in the PV's unit. It is the deviation alarm that
+	// Bradu's index assumes exists elsewhere: the index measures how predictable the error is, not
+	// whether the loop holds its setpoint (Experiment 25). Unlike the index, it applies even when
+	// the controller output is below the variability gate. Omitted means no tracking check.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxOffset *float64 `json:"maxOffset,omitempty"`
 }
 
 // OperatingPolicySpec is one way of operating the plant: what J must not exceed, which signals
