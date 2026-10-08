@@ -228,10 +228,10 @@ func unhealthyLoops(loops []v1alpha1.LoopStatus) string {
 	var names []string
 	for _, l := range loops {
 		if !l.Healthy {
-			names = append(names, fmt.Sprintf("%s PI=%s", l.Name, observed(l.Predictability)))
+			names = append(names, fmt.Sprintf("%s (%s, PI=%s, offset=%s)", l.Name, l.Reason, observed(l.Predictability), observed(l.Offset)))
 		}
 	}
-	return "below threshold: " + strings.Join(names, "; ")
+	return "unhealthy: " + strings.Join(names, "; ")
 }
 
 func notEvaluatedLoops(loops []v1alpha1.LoopStatus) string {

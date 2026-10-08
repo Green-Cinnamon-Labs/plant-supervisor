@@ -75,9 +75,12 @@ spec:
       timeConstantSeconds: 30       # T da malha em malha fechada → horizonte b = ceil(T / t_s)
       minPredictability: 0.4        # PI_L: abaixo disso a malha e considerada mal sintonizada
       minOutputStd: 0.1             # portao σ̄_y: so julga se a saida do controlador variar mais que isso
+      maxOffset: 1.0                # seguimento: |SP − media(PV)| maximo na janela, na unidade da PV
 ```
 
 As duas regras de Bradu, nessa ordem: (1) a malha so e julgada se a saida do controlador variar mais que `minOutputStd` — uma malha saturada, parada ou em manual nao diz nada sobre sintonia; (2) uma malha julgada e considerada ruim se o PI ficar abaixo de `minPredictability`. Se nenhuma malha puder ser julgada (portao ou falta de indice), a condition fica `Unknown` com motivo `NoLoopEvaluated`.
+
+**Seguimento de setpoint (`maxOffset`, opcional).** O indice de Bradu mede se o erro e *previsivel*, nao se a malha segura o setpoint. No Experimento 25 (IDV6), a pressao do reator subiu de forma regular ate 131 kPa acima do alvo, o indice foi a ~1 e a malha foi julgada "saudavel". No CERN isso nao e problema porque as malhas sao PID e o sistema ja tem alarme de desvio; o indice so complementa os alarmes. Aqui o `maxOffset` faz o papel desse alarme: a malha e ruim se `|offset|` passar do limite, **mesmo abaixo do portao de variabilidade** (uma malha que perdeu o setpoint pode estar parada ou saturada). Uma malha e ruim se falhar em qualquer um dos dois testes; o motivo diz qual (`BelowThreshold`, `OffsetExceeded` ou os dois).
 
 O PI e calculado sobre a **flutuacao do erro em torno da media**, nao sobre o erro bruto: as malhas do TEP sao proporcionais e deixam um offset constante, que sobre o erro bruto empurraria o PI para 1. O offset aparece a parte no status (spec #87).
 

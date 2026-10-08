@@ -87,6 +87,15 @@ spec:
                     of Bradu et al. (2017): how much of the loop error SP − PV an autoregressive model can predict.
                     The historian computes the index; the supervisor judges it against the thresholds below.
                   properties:
+                    maxOffset:
+                      description: |-
+                        MaxOffset is the setpoint-tracking limit: the loop is unhealthy when the mean error
+                        |SP − mean(PV)| over the window exceeds it, in the PV's unit. It is the deviation alarm that
+                        Bradu's index assumes exists elsewhere: the index measures how predictable the error is, not
+                        whether the loop holds its setpoint (Experiment 25). Unlike the index, it applies even when
+                        the controller output is below the variability gate. Omitted means no tracking check.
+                      minimum: 0
+                      type: number
                     minOutputStd:
                       description: |-
                         MinOutputStd is the variability gate σ̄_y: the loop is only judged when the standard

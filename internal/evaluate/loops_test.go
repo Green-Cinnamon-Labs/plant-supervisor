@@ -81,3 +81,53 @@ func TestLoopSpecsCarrySetpointAndTimeConstant(t *testing.T) {
 		t.Fatalf("%+v", specs)
 	}
 }
+
+// perfWithOffset is a loop result with a given index, valve std and mean error.
+func perfWithOffset(pi, sigmaOP, offset float64) historian.LoopPerformance {
+	return historian.LoopPerformance{PI: &pi, SigmaOP: &sigmaOP, Offset: &offset}
+}
+
+func tracked(name string, maxOffset float64) v1alpha1.ControlLoop {
+	l := loop(name)
+	l.MaxOffset = &maxOffset
+	return l
+}
+
+// Experiment 25: under IDV6 the reactor pressure error drifted smoothly (PI ~1) while the
+// pressure was 131 kPa above the setpoint. The tracking test must catch it.
+func TestPredictableButFarFromSetpointIsUnhealthy(t *testing.T) {
+	r := EvaluateLoops([]v1alpha1.ControlLoop{tracked("p", 20)}, map[string]historian.LoopPerformance{"p": perfWithOffset(1.0, 2.5, -131)})
+	if !r.Violated || r.Loops[0].Healthy || r.Loops[0].Reason != "OffsetExceeded" {
+		t.Fatalf("%+v", r.Loops[0])
+	}
+}
+
+// A quiet or saturated valve skips the tuning test, but the deviation alarm still applies.
+func TestOffsetIsJudgedEvenBelowTheGate(t *testing.T) {
+	r := EvaluateLoops([]v1alpha1.ControlLoop{tracked("p", 20)}, map[string]historian.LoopPerformance{"p": perfWithOffset(0.3, 0.01, 50)})
+	if !r.Violated || !r.Loops[0].Evaluated || r.Loops[0].Reason != "OffsetExceeded" {
+		t.Fatalf("%+v", r.Loops[0])
+	}
+}
+
+func TestOffsetWithinLimitBelowGateIsHealthyAndEvaluated(t *testing.T) {
+	// Nominal reactor pressure: P controller offset ~9 kPa, valve below the gate.
+	r := EvaluateLoops([]v1alpha1.ControlLoop{tracked("p", 20)}, map[string]historian.LoopPerformance{"p": perfWithOffset(0.3, 0.013, 9)})
+	if r.Violated || !r.Loops[0].Healthy || !r.Loops[0].Evaluated || r.Evaluated != 1 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestFailingBothTestsReportsBothReasons(t *testing.T) {
+	r := EvaluateLoops([]v1alpha1.ControlLoop{tracked("l", 1.0)}, map[string]historian.LoopPerformance{"l": perfWithOffset(0.05, 0.5, 3.5)})
+	if r.Loops[0].Reason != "BelowThreshold, OffsetExceeded" {
+		t.Fatalf("reason %q", r.Loops[0].Reason)
+	}
+}
+
+func TestNegativeOffsetUsesItsMagnitude(t *testing.T) {
+	r := EvaluateLoops([]v1alpha1.ControlLoop{tracked("l", 1.0)}, map[string]historian.LoopPerformance{"l": perfWithOffset(0.5, 0.5, -0.8)})
+	if r.Violated {
+		t.Fatalf("|-0.8| <= 1.0 should be healthy: %+v", r.Loops[0])
+	}
+}
